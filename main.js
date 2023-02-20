@@ -104,7 +104,7 @@ function setupCanvasAndContext()
   canvas.width = CANVAS_WIDTH;
   canvas.height = CANVAS_HEIGHT;
 
-  // Contex
+  // Context
   context = canvas.getContext( "webgpu" );
 
   // Expecting format "bgra8unorm"
@@ -172,15 +172,15 @@ function setupUniformBindGroup()
 {
   uniformBuffer = device.createBuffer(
     {
-        size: 4 * 4, // 4 floats
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-      } );
+      size: 4 * 4, // 4 floats
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    } );
 
   uniformBindGroup = device.createBindGroup(
     {
-        layout: pipeline.getBindGroupLayout(0),
-        entries: [
-            {
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        {
           binding: 0,
           resource:
           {
@@ -201,8 +201,8 @@ function setupShaderReload( url, reloadData, timeout )
 {
   setInterval( async function()
     {
-        const response = await fetch( url );
-        const data = await response.text();
+      const response = await fetch( url );
+      const data = await response.text();
 
       if( data !== reloadData )
       {
@@ -211,7 +211,7 @@ function setupShaderReload( url, reloadData, timeout )
 
         reloadData = data;
 
-        console.log("Reloaded");
+        console.log( "Reloaded " + url );
       }
 
     }, timeout );
@@ -256,7 +256,7 @@ async function main()
   // Check if window.navigator.gpu is available, so we can use WebGPU
   if ( !navigator.gpu )
   {
-    throw new Error( "WebGPU is not supported on this browser" );
+    throw new Error( "WebGPU is not supported on this browser." );
   }
 
   // Default gpu adapter
