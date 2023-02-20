@@ -5,6 +5,8 @@ const ASPECT = 1.6;
 const CANVAS_WIDTH = 400 * ASPECT;
 const CANVAS_HEIGHT = 400;
 
+const AUDIO_BUFFER_SIZE = 4096;
+
 const vertexShader = `
 @vertex
 fn main( @builtin(vertex_index) vertex_index : u32 ) -> @builtin(position) vec4<f32>
@@ -153,32 +155,42 @@ function setupPipeline( vertexShaderCode, fragmentShaderCode, presentationFormat
     });
 }
 
-function setupRenderPassDescriptor()
+function setupTexture( width, height, presentationFormat )
+{
+  return device.createTexture(
+    {
+      size: [ width, height ],
+      format: presentationFormat,
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    } );
+}
+
+function setupRenderPassDescriptor( view )
 {
   // Render pass descriptor
   renderPassDescriptor =
   {
     colorAttachments: [
       {
-        view: undefined, // Assign during frame update
+        view: view, // Assign during frame update
         //clearValue: { r: 0.3, g: 0.3, b: 0.6, a: 1.0 },
         loadOp: "clear",
         storeOp: "store",
-      }]
+      } ]
   };
 }
 
-function setupUniformBindGroup()
+function setupUniformBindGroup( size )
 {
   uniformBuffer = device.createBuffer(
     {
-      size: 4 * 4, // 4 floats
+      size: size * 4,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     } );
 
   uniformBindGroup = device.createBindGroup(
     {
-      layout: pipeline.getBindGroupLayout(0),
+      layout: pipeline.getBindGroupLayout( 0 ),
       entries: [
         {
           binding: 0,
@@ -197,6 +209,27 @@ function writeUniformData( data )
   device.queue.writeBuffer( uniformBuffer, 0, uniformData.buffer, uniformData.byteOffset, uniformData.byteLength );
 }
 
+function setColorAttachment( index, view )
+{
+  renderPassDescriptor.colorAttachments[ index ].view = view;  
+}
+
+function encodePassAndSubmitCommandBuffer( uniformBindGroup )
+{
+  // Command encoder
+  const commandEncoder = device.createCommandEncoder();
+
+  // Encode pass
+  const passEncoder = commandEncoder.beginRenderPass( renderPassDescriptor );
+  passEncoder.setPipeline( pipeline );
+  passEncoder.setBindGroup( 0, uniformBindGroup );
+  passEncoder.draw( 4 );
+  passEncoder.end();
+
+  // Submit command buffer
+  device.queue.submit( [commandEncoder.finish()] );  
+}
+
 function setupShaderReload( url, reloadData, timeout )
 {
   setInterval( async function()
@@ -207,7 +240,7 @@ function setupShaderReload( url, reloadData, timeout )
       if( data !== reloadData )
       {
         setupPipeline( vertexShader, data, presentationFormat );
-        setupUniformBindGroup();
+        setupUniformBindGroup( 4 );
 
         reloadData = data;
 
@@ -228,40 +261,24 @@ function render( time )
 
   const elapsed = time - start;
 
-  // Update uniform buffer
   writeUniformData( [ CANVAS_WIDTH, CANVAS_HEIGHT, elapsed, 0.0 ] );
+  setColorAttachment( 0, context.getCurrentTexture().createView() );
+  encodePassAndSubmitCommandBuffer( uniformBindGroup );
 
-  // Texture view of current swap chain texture from context
-  renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
-
-  // Command encoder
-  const commandEncoder = device.createCommandEncoder();
-
-  // Encode pass
-  const passEncoder = commandEncoder.beginRenderPass( renderPassDescriptor );
-  passEncoder.setPipeline( pipeline );
-  passEncoder.setBindGroup( 0, uniformBindGroup );
-  passEncoder.draw( 4 );
-  passEncoder.end();
-
-  // Submit command buffer
-  device.queue.submit( [commandEncoder.finish()] );
-
-  // Request next frame
   requestAnimationFrame( render );
 } 
 
 async function main()
 {
   // Check if window.navigator.gpu is available, so we can use WebGPU
-  if ( !navigator.gpu )
+  if( !navigator.gpu )
   {
     throw new Error( "WebGPU is not supported on this browser." );
   }
 
   // Default gpu adapter
   const gpuAdapter = await navigator.gpu.requestAdapter();
-  if ( !gpuAdapter )
+  if( !gpuAdapter )
   {
     throw new Error( "Can not use WebGPU. No GPU adapter available." );
   }
@@ -272,8 +289,8 @@ async function main()
 
   setupCanvasAndContext();
   setupPipeline( vertexShader, audioShader, presentationFormat );
-  setupRenderPassDescriptor();
-  setupUniformBindGroup();
+  setupRenderPassDescriptor( undefined );
+  setupUniformBindGroup( 4 );
   writeUniformData( [ CANVAS_WIDTH, CANVAS_HEIGHT, 44100.0, 0.0 ] );
 
   if( FULLSCREEN )
