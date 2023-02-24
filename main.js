@@ -1,18 +1,22 @@
 "use strict";
 
 const FULLSCREEN = false;
+const AUDIO = false;
+const SHADER_RELOAD = false;
+
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 400 * ASPECT;
 const CANVAS_HEIGHT = 400;
 
-const AUDIO_BUFFER_SIZE = 4096;
+const AUDIO_BUFFER_WIDTH = 1024;
+const AUDIO_BUFFER_HEIGHT = 1024;
 
 const vertexShader = `
 @vertex
 fn main( @builtin(vertex_index) vertex_index : u32 ) -> @builtin(position) vec4<f32>
 {  
-  var pos = array<vec2<f32>, 4>( vec2(-1.0, 1.0), vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(1.0, -1.0) );
-  return vec4<f32>(pos[vertex_index], 0.0, 1.0);
+  var pos = array<vec2<f32>, 4>( vec2( -1.0, 1.0 ), vec2( -1.0, -1.0 ), vec2( 1.0, 1.0 ), vec2( 1.0, -1.0 ) );
+  return vec4<f32>( pos[vertex_index], 0.0, 1.0 );
 }
 `;
 
@@ -24,79 +28,43 @@ struct Uniforms
 }
 @binding(0) @group(0) var<uniform> uniforms : Uniforms;
 
-const BPM : f32 = 160.0;
-const PI : f32 = 3.141592654;
-const TAU : f32 = 6.283185307;
-
-fn time_to_beat( t : f32 ) -> f32
+@fragment
+fn main( @builtin(position) position : vec4<f32> ) -> @location(0) vec2<f32>
 {
-  return t / 60.0 * BPM;
+  let time : f32 = ( uniforms.resolution.x * ( position.y - 0.5 ) + position.x - 0.5 ) / uniforms.sample_rate;
+  let val : f32 = sin( time * 440.0 * 1.2 * 3.1415 );
+  return vec2<f32>( val, val );
 }
+`;
 
-fn beat_to_time( b : f32 ) -> f32
+const videoShaderFile = "http://localhost:8000/fragmentShader.wgsl";
+const videoShader = `
+struct Uniforms
 {
-  return b / BPM * 60.0;
+  resolution : vec2<f32>,
+  time : f32,
 }
-
-fn sine( phase : f32 ) -> f32
-{
-  return sin( TAU * phase );
-}
-
-fn rand( co : vec2<f32> ) -> f32
-{
-  return fract( sin( dot( co, vec2<f32>( 12.9898, 78.233 ) ) ) * 43758.5453 );
-}
-
-fn noise( phase : f32 ) -> vec4<f32>
-{
-  let uv : vec2<f32> = phase / vec2<f32>( 0.512, 0.487 );
-    return vec4<f32>( rand( uv ) ); 
-}
-
-fn kick( time : f32 ) -> f32
-{
-  let amp : f32 = exp( -5.0 * time );
-  let phase : f32 = 60.0 * time - 15.0 * exp( -60.0 * time );
-  return amp * sine( phase );
-}
-
-fn hi_hat( time : f32 ) -> vec2<f32>
-{
-  let amp : f32 = exp( -40.0 * time );
-  return amp * noise( time * 110.0 ).xy;
-}
+@binding(0) @group(0) var<uniform> uniforms : Uniforms;
 
 @fragment
-fn main( @builtin(position) position : vec4<f32> ) -> @location(0) vec4<f32>
+fn main( @builtin(position) position : vec4<f32>)  -> @location(0) vec4<f32>
 {
-  let time : f32 = ( position.x - 0.5 + uniforms.resolution.x * ( position.y - 0.5 ) ) / uniforms.sample_rate;
-  let beat : f32 = time_to_beat( time );
-  var res : vec2<f32> = vec2<f32>( 0.0 );
-
-  // Kick
-  res += 0.6 * kick( beat_to_time( beat % 1.0 ) );
-
-  // Hihat
-  res += 0.3 * hi_hat( beat_to_time( ( beat + 0.5 ) % 1.0 ) );
-
-  return vec4<f32>( clamp( res, vec2<f32>( 0.0 ), vec2<f32>( 1.0 ) ), 0.0, 1.0 );
+  return vec4<f32>( 0.6, 0.3, 0.3, 1.0 );
 }
 `;
 
-const videoShaderFile = "http://localhost:8000/fragmentShader.c";
-const videoShader = `
-  TODO
-`;
+let audioContext;
+let audioBufferSourceNode;
 
 let device;
-let canvas, context, presentationFormat;
-let pipeline;
+let uniformBuffer;
+let uniformBindGroupLayout, uniformBindGroup;
 let renderPassDescriptor;
-let uniformBindGroup, uniformBuffer;
+let pipeline;
+
+let canvas, context, presentationFormat;
 
 let reloadData;
-let start;
 
 function setupCanvasAndContext()
 {
@@ -106,13 +74,16 @@ function setupCanvasAndContext()
   canvas.width = CANVAS_WIDTH;
   canvas.height = CANVAS_HEIGHT;
 
+  // Expecting format "bgra8unorm"
+  presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+  if( presentationFormat !== "bgra8unorm" )
+  {
+    throw new Error( `Expected canvas pixel format of 'bgra8unorm' but was '${presentationFormat}'.`)
+  }
+
   // Context
   context = canvas.getContext( "webgpu" );
 
-  // Expecting format "bgra8unorm"
-  presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-
-  // Link gpu and canvas
   context.configure( {
     device: device,
     format: presentationFormat,
@@ -120,12 +91,80 @@ function setupCanvasAndContext()
   } );
 }
 
-function setupPipeline( vertexShaderCode, fragmentShaderCode, presentationFormat )
+function createTexture( width, height, presentationFormat, usage )
 {
-  // Define render pipeline
-  pipeline = device.createRenderPipeline(
+  return device.createTexture(
     {
-      layout: "auto",
+      size: [ width, height ],
+      format: presentationFormat,
+      usage: usage,
+    } );
+}
+
+function createUniformBuffer( size )
+{
+  return device.createBuffer(
+    {
+      size: size * 4,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    } );  
+}
+
+function createBindGroupLayout()
+{
+  return device.createBindGroupLayout(
+    {
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.FRAGMENT,
+          buffer:
+          {
+            type: "uniform",
+          },
+        },
+      ],
+    } );
+}
+
+function createBindGroup( buffer, bindGroupLayout )
+{
+  return device.createBindGroup(
+    {
+      layout: /*( bindGroupLayout === undefined ) ? pipeline.getBindGroupLayout( 0 ) :*/ bindGroupLayout,
+      entries: [
+        {
+          binding: 0,
+          resource:
+          {
+            buffer,
+          },
+        },
+      ],
+    } );
+}
+
+function createRenderPassDescriptor( view )
+{
+  return (
+    {
+      colorAttachments:
+      [
+        {
+          view,
+          clearValue: { r: 0.3, g: 0.3, b: 0.3, a: 1.0 },
+          loadOp: "clear",
+          storeOp: "store",
+        },
+      ]
+    } );
+}
+
+function createPipeline( vertexShaderCode, fragmentShaderCode, presentationFormat, bindGroupLayout )
+{
+  return device.createRenderPipeline(
+    {
+      layout: /*bindGroupLayout === undefined ? "auto" :*/ device.createPipelineLayout( { bindGroupLayouts: [ bindGroupLayout ] } ),
       vertex:
         {
           module: device.createShaderModule(
@@ -155,66 +194,13 @@ function setupPipeline( vertexShaderCode, fragmentShaderCode, presentationFormat
     });
 }
 
-function setupTexture( width, height, presentationFormat )
+function writeBufferData( buffer, data )
 {
-  return device.createTexture(
-    {
-      size: [ width, height ],
-      format: presentationFormat,
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-    } );
+  const bufferData = new Float32Array( data );
+  device.queue.writeBuffer( buffer, 0, bufferData.buffer, bufferData.byteOffset, bufferData.byteLength );
 }
 
-function setupRenderPassDescriptor( view )
-{
-  // Render pass descriptor
-  renderPassDescriptor =
-  {
-    colorAttachments: [
-      {
-        view: view, // Assign during frame update
-        //clearValue: { r: 0.3, g: 0.3, b: 0.6, a: 1.0 },
-        loadOp: "clear",
-        storeOp: "store",
-      } ]
-  };
-}
-
-function setupUniformBindGroup( size )
-{
-  uniformBuffer = device.createBuffer(
-    {
-      size: size * 4,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    } );
-
-  uniformBindGroup = device.createBindGroup(
-    {
-      layout: pipeline.getBindGroupLayout( 0 ),
-      entries: [
-        {
-          binding: 0,
-          resource:
-          {
-            buffer: uniformBuffer,
-          },
-        },
-      ],
-    } );
-}
-
-function writeUniformData( data )
-{
-  let uniformData = new Float32Array( data );
-  device.queue.writeBuffer( uniformBuffer, 0, uniformData.buffer, uniformData.byteOffset, uniformData.byteLength );
-}
-
-function setColorAttachment( index, view )
-{
-  renderPassDescriptor.colorAttachments[ index ].view = view;  
-}
-
-function encodePassAndSubmitCommandBuffer( uniformBindGroup )
+function encodePassAndSubmitCommandBuffer( renderPassDescriptor, pipeline, bindGroup )
 {
   // Command encoder
   const commandEncoder = device.createCommandEncoder();
@@ -222,12 +208,22 @@ function encodePassAndSubmitCommandBuffer( uniformBindGroup )
   // Encode pass
   const passEncoder = commandEncoder.beginRenderPass( renderPassDescriptor );
   passEncoder.setPipeline( pipeline );
-  passEncoder.setBindGroup( 0, uniformBindGroup );
+  passEncoder.setBindGroup( 0, bindGroup );
   passEncoder.draw( 4 );
   passEncoder.end();
 
   // Submit command buffer
-  device.queue.submit( [commandEncoder.finish()] );  
+  device.queue.submit( [ commandEncoder.finish() ] );
+}
+
+function render( time )
+{
+  renderPassDescriptor.colorAttachments[ 0 ].view = context.getCurrentTexture().createView();
+  
+  writeBufferData( uniformBuffer, [ CANVAS_WIDTH, CANVAS_HEIGHT, AUDIO ? audioContext.currentTime * 1000.0 : time, 0.0 ] );
+  encodePassAndSubmitCommandBuffer( renderPassDescriptor, pipeline, uniformBindGroup );
+
+  requestAnimationFrame( render );
 }
 
 function setupShaderReload( url, reloadData, timeout )
@@ -239,8 +235,7 @@ function setupShaderReload( url, reloadData, timeout )
 
       if( data !== reloadData )
       {
-        setupPipeline( vertexShader, data, presentationFormat );
-        setupUniformBindGroup( 4 );
+        pipeline = createPipeline( vertexShader, data, presentationFormat, uniformBindGroupLayout );
 
         reloadData = data;
 
@@ -250,68 +245,134 @@ function setupShaderReload( url, reloadData, timeout )
     }, timeout );
 }
 
-function render( time )
-{
-  if( start === undefined )
-  {
-    start = time;
-
-    setupShaderReload( videoShaderFile, reloadData, 1000 );
-  }
-
-  const elapsed = time - start;
-
-  writeUniformData( [ CANVAS_WIDTH, CANVAS_HEIGHT, elapsed, 0.0 ] );
-  setColorAttachment( 0, context.getCurrentTexture().createView() );
-  encodePassAndSubmitCommandBuffer( uniformBindGroup );
-
-  requestAnimationFrame( render );
-} 
-
 async function main()
 {
-  // Check if window.navigator.gpu is available, so we can use WebGPU
   if( !navigator.gpu )
   {
     throw new Error( "WebGPU is not supported on this browser." );
   }
 
-  // Default gpu adapter
   const gpuAdapter = await navigator.gpu.requestAdapter();
   if( !gpuAdapter )
   {
     throw new Error( "Can not use WebGPU. No GPU adapter available." );
   }
 
-  // Default logical gpu device
   device = await gpuAdapter.requestDevice();
-  // TODO check device lost
-
-  setupCanvasAndContext();
-  setupPipeline( vertexShader, audioShader, presentationFormat );
-  setupRenderPassDescriptor( undefined );
-  setupUniformBindGroup( 4 );
-  writeUniformData( [ CANVAS_WIDTH, CANVAS_HEIGHT, 44100.0, 0.0 ] );
-
-  if( FULLSCREEN )
+  if( !device )
   {
-    // Event listener for click to full screen (if required) and render start
-    document.querySelector( "button" ).addEventListener( "click", e =>
+    throw new Error( "Failed to request logical device." );
+  }
+
+  // Setup uniform buffer and bind group
+  uniformBuffer = createUniformBuffer( 4 );
+  uniformBindGroupLayout = createBindGroupLayout();
+  uniformBindGroup = createBindGroup( uniformBuffer, uniformBindGroupLayout );
+
+  if( AUDIO )
+  {
+    audioContext = new AudioContext();
+
+    // Create audio buffer
+    let webAudioBuffer = audioContext.createBuffer( 2, AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT, audioContext.sampleRate );
+    console.log( "Max audio length: " + ( webAudioBuffer.length / audioContext.sampleRate / 60 ).toFixed( 2 ) + " minutes" );  
+
+    // Create texture target for audio
+    let audioTexture = createTexture( AUDIO_BUFFER_WIDTH, AUDIO_BUFFER_HEIGHT, "rg32float", GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC );
+
+    // Write to uniform buffer
+    writeBufferData( uniformBuffer, [ AUDIO_BUFFER_WIDTH, AUDIO_BUFFER_HEIGHT, audioContext.sampleRate, 0.0 ] );
+
+    // Setup pipeline to render audio to texture
+    renderPassDescriptor = createRenderPassDescriptor( audioTexture.createView() );
+    pipeline = createPipeline( vertexShader, audioShader, "rg32float", uniformBindGroupLayout );
+
+    // Render audio
+    encodePassAndSubmitCommandBuffer( renderPassDescriptor, pipeline, uniformBindGroup );
+
+    // Create buffer where we can copy our audio texture to
+    const audioBuffer = device.createBuffer(
       {
-        canvas.requestFullscreen();
-        requestAnimationFrame( render );
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        size: AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT * 8,
       } );
+   
+    // Copy texture to audio buffer
+    const commandEncoder = device.createCommandEncoder();
+
+    commandEncoder.copyTextureToBuffer(
+      {
+        texture: audioTexture,
+      },
+      {
+        buffer: audioBuffer,
+        bytesPerRow: AUDIO_BUFFER_WIDTH * 2 * 4, // RG32FLOAT
+      },
+      [ AUDIO_BUFFER_WIDTH, AUDIO_BUFFER_HEIGHT ]
+    );
+    
+    device.queue.submit( [ commandEncoder.finish() ] );
+   
+    // Map audio buffer for CPU to read
+    await audioBuffer.mapAsync( GPUMapMode.READ );
+    const audioData = new Float32Array( audioBuffer.getMappedRange() );
+    
+    // Feed data to web audio
+    const channel0 = webAudioBuffer.getChannelData( 0 );
+    const channel1 = webAudioBuffer.getChannelData( 1 );
+    for( let i = 0; i < AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT; i++ )
+    {
+      channel0[ i ] = audioData[ ( i << 1 ) + 0 ];
+      channel1[ i ] = audioData[ ( i << 1 ) + 1 ];
+    }
+
+    // Release GPU buffer
+    audioBuffer.unmap();
+
+    // Prepare audio buffer source node and connect it to output device
+    audioBufferSourceNode = audioContext.createBufferSource();
+    audioBufferSourceNode.buffer = webAudioBuffer;
+    audioBufferSourceNode.connect( audioContext.destination );
   }
   else
-  { 
-    canvas.style.width = CANVAS_WIDTH;
-    canvas.style.height = CANVAS_HEIGHT;
-    canvas.style.position = "absolute";
-    canvas.style.left = 0;
-    canvas.style.top = 0;
-
-    requestAnimationFrame( render );
+  {
+    renderPassDescriptor = createRenderPassDescriptor( null );
   }
+
+  // Setup canvas and configure WebGPU context
+  setupCanvasAndContext();
+
+  // Setup pipeline to render actual graphics
+  pipeline = createPipeline( vertexShader, videoShader, presentationFormat, uniformBindGroupLayout );
+
+  // Event listener for click to full screen (if required) and render start
+  document.querySelector( "button" ).addEventListener( "click", e =>
+    {
+      if( FULLSCREEN )
+      {
+        canvas.requestFullscreen();
+      }
+      else
+      {
+        canvas.style.width = CANVAS_WIDTH;
+        canvas.style.height = CANVAS_HEIGHT;
+        canvas.style.position = "absolute";
+        canvas.style.left = 0;
+        canvas.style.top = 0;
+      }
+
+      if( AUDIO )
+      {
+        audioBufferSourceNode.start();
+      }
+      
+      requestAnimationFrame( render );
+      
+      if( SHADER_RELOAD )
+      {
+        setupShaderReload( videoShaderFile, reloadData, 1000 );
+      }
+    } );
 }
 
 main();
