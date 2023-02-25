@@ -64,6 +64,7 @@ let pipeline;
 
 let canvas, context, presentationFormat;
 
+let start;
 let reloadData;
 
 function setupCanvasAndContext()
@@ -84,7 +85,8 @@ function setupCanvasAndContext()
   // Context
   context = canvas.getContext( "webgpu" );
 
-  context.configure( {
+  context.configure(
+  {
     device: device,
     format: presentationFormat,
     alphaMode: "opaque"
@@ -110,13 +112,13 @@ function createUniformBuffer( size )
     } );  
 }
 
-function createBindGroupLayout()
+function createBindGroupLayout( index )
 {
   return device.createBindGroupLayout(
     {
       entries: [
         {
-          binding: 0,
+          binding: index,
           visibility: GPUShaderStage.FRAGMENT,
           buffer:
           {
@@ -127,14 +129,14 @@ function createBindGroupLayout()
     } );
 }
 
-function createBindGroup( buffer, bindGroupLayout )
+function createBindGroup( buffer, index, bindGroupLayout )
 {
   return device.createBindGroup(
     {
       layout: /*( bindGroupLayout === undefined ) ? pipeline.getBindGroupLayout( 0 ) :*/ bindGroupLayout,
       entries: [
         {
-          binding: 0,
+          binding: index,
           resource:
           {
             buffer,
@@ -146,18 +148,16 @@ function createBindGroup( buffer, bindGroupLayout )
 
 function createRenderPassDescriptor( view )
 {
-  return (
-    {
-      colorAttachments:
-      [
-        {
-          view,
-          clearValue: { r: 0.3, g: 0.3, b: 0.3, a: 1.0 },
-          loadOp: "clear",
-          storeOp: "store",
-        },
-      ]
-    } );
+  return {
+    colorAttachments:
+    [
+      {
+        view,
+        clearValue: { r: 0.3, g: 0.3, b: 0.3, a: 1.0 },
+        loadOp: "clear",
+        storeOp: "store",
+      },
+    ] };
 }
 
 function createPipeline( vertexShaderCode, fragmentShaderCode, presentationFormat, bindGroupLayout )
@@ -218,9 +218,14 @@ function encodePassAndSubmitCommandBuffer( renderPassDescriptor, pipeline, bindG
 
 function render( time )
 {
+  if( audioContext === undefined && start === undefined )
+  {
+    start = time;
+  }
+
   renderPassDescriptor.colorAttachments[ 0 ].view = context.getCurrentTexture().createView();
   
-  writeBufferData( uniformBuffer, [ CANVAS_WIDTH, CANVAS_HEIGHT, AUDIO ? audioContext.currentTime * 1000.0 : time, 0.0 ] );
+  writeBufferData( uniformBuffer, [ CANVAS_WIDTH, CANVAS_HEIGHT, AUDIO ? audioContext.currentTime * 1000.0 : ( time - start ), 0.0 ] );
   encodePassAndSubmitCommandBuffer( renderPassDescriptor, pipeline, uniformBindGroup );
 
   requestAnimationFrame( render );
@@ -266,8 +271,8 @@ async function main()
 
   // Setup uniform buffer and bind group
   uniformBuffer = createUniformBuffer( 4 );
-  uniformBindGroupLayout = createBindGroupLayout();
-  uniformBindGroup = createBindGroup( uniformBuffer, uniformBindGroupLayout );
+  uniformBindGroupLayout = createBindGroupLayout( 0 );
+  uniformBindGroup = createBindGroup( uniformBuffer, 0, uniformBindGroupLayout );
 
   if( AUDIO )
   {
