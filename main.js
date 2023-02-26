@@ -1,8 +1,8 @@
 "use strict";
 
 const FULLSCREEN = false;
-const AUDIO = true;
-const SHADER_RELOAD = true;
+const AUDIO = false;
+const SHADER_RELOAD = false;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 400 * ASPECT;
@@ -49,8 +49,6 @@ struct Uniforms
 @fragment
 fn main( @builtin(position) position : vec4<f32>)  -> @location(0) vec4<f32>
 {
-  var v : vec2<f32> = uniforms.resolution;
-  var t : f32 = uniforms.time;
   return vec4<f32>( 0.6, 0.3, 0.3, 1.0 );
 }
 `;
@@ -143,7 +141,7 @@ function createPipeline( vertexShaderCode, fragmentShaderCode, presentationForma
         {
           topology: "triangle-strip",
         },
-    });
+    } );
 }
 
 function writeBufferData( buffer, data )
