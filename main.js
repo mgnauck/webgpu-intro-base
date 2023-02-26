@@ -1,8 +1,8 @@
 "use strict";
 
 const FULLSCREEN = false;
-const AUDIO = false;
-const SHADER_RELOAD = false;
+const AUDIO = true;
+const SHADER_RELOAD = true;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 400 * ASPECT;
@@ -49,6 +49,8 @@ struct Uniforms
 @fragment
 fn main( @builtin(position) position : vec4<f32>)  -> @location(0) vec4<f32>
 {
+  var v : vec2<f32> = uniforms.resolution;
+  var t : f32 = uniforms.time;
   return vec4<f32>( 0.6, 0.3, 0.3, 1.0 );
 }
 `;
@@ -58,11 +60,14 @@ let audioBufferSourceNode;
 
 let device;
 let uniformBuffer;
-let uniformBindGroupLayout, uniformBindGroup;
+let uniformBindGroupLayout;
+let uniformBindGroup;
 let renderPassDescriptor;
 let pipeline;
 
-let canvas, context, presentationFormat;
+let canvas;
+let context;
+let presentationFormat;
 
 let start;
 let reloadData;
@@ -93,59 +98,6 @@ function setupCanvasAndContext()
   } );
 }
 
-function createTexture( width, height, presentationFormat, usage )
-{
-  return device.createTexture(
-    {
-      size: [ width, height ],
-      format: presentationFormat,
-      usage: usage,
-    } );
-}
-
-function createUniformBuffer( size )
-{
-  return device.createBuffer(
-    {
-      size: size * 4,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    } );  
-}
-
-function createBindGroupLayout( index )
-{
-  return device.createBindGroupLayout(
-    {
-      entries: [
-        {
-          binding: index,
-          visibility: GPUShaderStage.FRAGMENT,
-          buffer:
-          {
-            type: "uniform",
-          },
-        },
-      ],
-    } );
-}
-
-function createBindGroup( buffer, index, bindGroupLayout )
-{
-  return device.createBindGroup(
-    {
-      layout: /*( bindGroupLayout === undefined ) ? pipeline.getBindGroupLayout( 0 ) :*/ bindGroupLayout,
-      entries: [
-        {
-          binding: index,
-          resource:
-          {
-            buffer,
-          },
-        },
-      ],
-    } );
-}
-
 function createRenderPassDescriptor( view )
 {
   return {
@@ -162,9 +114,9 @@ function createRenderPassDescriptor( view )
 
 function createPipeline( vertexShaderCode, fragmentShaderCode, presentationFormat, bindGroupLayout )
 {
-  return device.createRenderPipeline(
+  return device.createRenderPipelineAsync(
     {
-      layout: /*bindGroupLayout === undefined ? "auto" :*/ device.createPipelineLayout( { bindGroupLayouts: [ bindGroupLayout ] } ),
+      layout: ( bindGroupLayout === undefined ) ? "auto" : device.createPipelineLayout( { bindGroupLayouts: [ bindGroupLayout ] } ),
       vertex:
         {
           module: device.createShaderModule(
@@ -224,7 +176,6 @@ function render( time )
   }
 
   renderPassDescriptor.colorAttachments[ 0 ].view = context.getCurrentTexture().createView();
-  
   writeBufferData( uniformBuffer, [ CANVAS_WIDTH, CANVAS_HEIGHT, AUDIO ? audioContext.currentTime * 1000.0 : ( time - start ), 0.0 ] );
   encodePassAndSubmitCommandBuffer( renderPassDescriptor, pipeline, uniformBindGroup );
 
@@ -240,7 +191,7 @@ function setupShaderReload( url, reloadData, timeout )
 
       if( data !== reloadData )
       {
-        pipeline = createPipeline( vertexShader, data, presentationFormat, uniformBindGroupLayout );
+        pipeline = await createPipeline( vertexShader, data, presentationFormat, uniformBindGroupLayout );
 
         reloadData = data;
 
@@ -269,10 +220,42 @@ async function main()
     throw new Error( "Failed to request logical device." );
   }
 
-  // Setup uniform buffer and bind group
-  uniformBuffer = createUniformBuffer( 4 );
-  uniformBindGroupLayout = createBindGroupLayout( 0 );
-  uniformBindGroup = createBindGroup( uniformBuffer, 0, uniformBindGroupLayout );
+  // Create uniform buffer
+  uniformBuffer = device.createBuffer(
+    {
+      size: 4 * 4,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    } );
+
+  // Create bind group layout for uniform buffer visible in fragment shader
+  uniformBindGroupLayout = device.createBindGroupLayout(
+    {
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.FRAGMENT,
+          buffer:
+          {
+            type: "uniform",
+          },
+        },
+      ],
+    } );
+
+  // Create bind group for uniform buffer based on above layout
+  uniformBindGroup = device.createBindGroup(
+    {
+      layout: uniformBindGroupLayout,
+      entries: [
+        {
+          binding: 0,
+          resource:
+          {
+            buffer : uniformBuffer,
+          },
+        },
+      ],
+    } );
 
   if( AUDIO )
   {
@@ -283,14 +266,19 @@ async function main()
     console.log( "Max audio length: " + ( webAudioBuffer.length / audioContext.sampleRate / 60 ).toFixed( 2 ) + " minutes" );  
 
     // Create texture target for audio
-    let audioTexture = createTexture( AUDIO_BUFFER_WIDTH, AUDIO_BUFFER_HEIGHT, "rg32float", GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC );
-
-    // Write to uniform buffer
-    writeBufferData( uniformBuffer, [ AUDIO_BUFFER_WIDTH, AUDIO_BUFFER_HEIGHT, audioContext.sampleRate, 0.0 ] );
+    let audioTexture = device.createTexture(
+      {
+        size: [ AUDIO_BUFFER_WIDTH, AUDIO_BUFFER_HEIGHT ],
+        format: "rg32float",
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+      } );
 
     // Setup pipeline to render audio to texture
     renderPassDescriptor = createRenderPassDescriptor( audioTexture.createView() );
-    pipeline = createPipeline( vertexShader, audioShader, "rg32float", uniformBindGroupLayout );
+    pipeline = await createPipeline( vertexShader, audioShader, "rg32float", uniformBindGroupLayout );
+
+    // Write to uniform buffer
+    writeBufferData( uniformBuffer, [ AUDIO_BUFFER_WIDTH, AUDIO_BUFFER_HEIGHT, audioContext.sampleRate, 0.0 ] );
 
     // Render audio
     encodePassAndSubmitCommandBuffer( renderPassDescriptor, pipeline, uniformBindGroup );
@@ -348,7 +336,7 @@ async function main()
   setupCanvasAndContext();
 
   // Setup pipeline to render actual graphics
-  pipeline = createPipeline( vertexShader, videoShader, presentationFormat, uniformBindGroupLayout );
+  pipeline = await createPipeline( vertexShader, videoShader, presentationFormat, uniformBindGroupLayout );
 
   // Event listener for click to full screen (if required) and render start
   document.querySelector( "button" ).addEventListener( "click", e =>
