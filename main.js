@@ -1,8 +1,8 @@
 'use strict';
 
 const FULLSCREEN = false;
-const AUDIO = false;
-const SHADER_RELOAD = false;
+const AUDIO = true;
+const SHADER_RELOAD = true;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 400 * ASPECT;
@@ -11,28 +11,28 @@ const CANVAS_HEIGHT = 400;
 const AUDIO_BUFFER_WIDTH = 1024;
 const AUDIO_BUFFER_HEIGHT = 1024;
 
+const audioShader = `
+@binding(0) @group(0) var<storage, read_write> outputBuffer: array<vec2<f32>>;
+// TODO "uniform" for sample rate
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+  if (global_id.x >= ${AUDIO_BUFFER_WIDTH} * ${AUDIO_BUFFER_HEIGHT}) {
+    return;
+  }
+
+  let time: f32 = f32(global_id.x) / 44100.0;
+  let val: f32 = sin(time * 440.0 * 1.2 * 3.1415);
+  outputBuffer[global_id.x] = vec2<f32>(val, val);
+}
+`;
+
 const vertexShader = `
 @vertex
 fn main(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32>
 {  
   var pos = array<vec2<f32>, 4>(vec2( -1.0, 1.0 ), vec2( -1.0, -1.0 ), vec2( 1.0, 1.0 ), vec2( 1.0, -1.0 ));
   return vec4<f32>(pos[vertex_index], 0.0, 1.0);
-}
-`;
-
-const audioShader = `
-struct Uniforms {
-  resolution: vec2<f32>,
-  sample_rate: f32,
-}
-@binding(0) @group(0) var<uniform> uniforms: Uniforms;
-
-@fragment
-fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec2<f32>
-{
-  let time: f32 = (uniforms.resolution.x * (position.y - 0.5) + position.x - 0.5) / uniforms.sample_rate;
-  let val: f32 = sin(time * 440.0 * 1.2 * 3.1415);
-  return vec2<f32>(val, val);
 }
 `;
 
@@ -60,6 +60,11 @@ let uniformBindGroupLayout;
 let uniformBindGroup;
 let renderPassDescriptor;
 let pipeline;
+
+let computeBuffer;
+let computeBindGroupLayout;
+let computeBindGroup;
+let computePipeline;
 
 let canvas;
 let context;
@@ -108,6 +113,18 @@ function createPipeline(vertexShaderCode, fragmentShaderCode, presentationFormat
     },
     primitive : {
       topology : 'triangle-strip',
+    },
+  });
+}
+
+function createComputePipeline(computeShaderCode, bindGroupLayout) {
+  return device.createComputePipelineAsync({
+    layout : (bindGroupLayout === undefined)
+                 ? 'auto'
+                 : device.createPipelineLayout({bindGroupLayouts : [ bindGroupLayout ]}),
+    compute : {
+      module : device.createShaderModule({code : computeShaderCode}),
+      entryPoint : 'main',
     },
   });
 }
@@ -178,6 +195,91 @@ async function main() {
     throw new Error('Failed to request logical device.');
   }
 
+  if (AUDIO) {
+
+    // WebAudio
+    audioContext = new AudioContext();
+
+    // Create web audio buffer
+    let webAudioBuffer = audioContext.createBuffer(2, AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT,
+                                                   audioContext.sampleRate);
+    console.log('Max audio length: ' +
+                (webAudioBuffer.length / audioContext.sampleRate / 60).toFixed(2) + ' minutes');
+
+    // Create buffer for the audio compute shader to write to
+    computeBuffer = device.createBuffer({
+      size : AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT * 2 * 4,
+      usage : GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+    });
+
+    computeBindGroupLayout = device.createBindGroupLayout({
+      entries : [ {
+        binding : 0,
+        visibility : GPUShaderStage.COMPUTE,
+        buffer : {type : 'storage'}, // read-only-storage??
+      } ]
+    });
+
+    computeBindGroup = device.createBindGroup({
+      layout : computeBindGroupLayout,
+      entries : [ {
+        binding : 0,
+        resource : {buffer : computeBuffer},
+      } ]
+    });
+
+    // Create compute pipeline for audio
+    computePipeline = await createComputePipeline(audioShader, computeBindGroupLayout);
+
+    // Command encoder
+    let commandEncoder = device.createCommandEncoder();
+
+    // Encode pass
+    const passEncoder = commandEncoder.beginComputePass();
+    passEncoder.setPipeline(computePipeline);
+    passEncoder.setBindGroup(0, computeBindGroup);
+    passEncoder.dispatchWorkgroups(AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT / 64);
+    passEncoder.end();
+
+    // Submit command buffer
+    device.queue.submit([ commandEncoder.finish() ]);
+
+    // Create buffer where we can copy our audio texture to
+    const readBuffer = device.createBuffer({
+      usage : GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+      size : AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT * 2 * 4,
+    });
+
+    // Copy texture to audio buffer
+    commandEncoder = device.createCommandEncoder();
+    commandEncoder.copyBufferToBuffer(computeBuffer, 0, readBuffer, 0,
+                                      AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT * 2 * 4);
+    device.queue.submit([ commandEncoder.finish() ]);
+
+    // Map audio buffer for CPU to read
+    await readBuffer.mapAsync(GPUMapMode.READ);
+    const audioData = new Float32Array(readBuffer.getMappedRange());
+
+    // Feed data to web audio
+    const channel0 = webAudioBuffer.getChannelData(0);
+    const channel1 = webAudioBuffer.getChannelData(1);
+    for (let i = 0; i < AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT; i++) {
+      channel0[i] = audioData[(i << 1) + 0];
+      channel1[i] = audioData[(i << 1) + 1];
+    }
+
+    // Release GPU buffer
+    readBuffer.unmap();
+
+    // Prepare audio buffer source node and connect it to output device
+    audioBufferSourceNode = audioContext.createBufferSource();
+    audioBufferSourceNode.buffer = webAudioBuffer;
+    audioBufferSourceNode.connect(audioContext.destination);
+  }
+
+  // Setup canvas and configure WebGPU context
+  setupCanvasAndContext();
+
   // Create uniform buffer
   uniformBuffer = device.createBuffer({
     size : 4 * 4,
@@ -186,7 +288,11 @@ async function main() {
 
   // Create bind group layout for uniform buffer visible in fragment shader
   uniformBindGroupLayout = device.createBindGroupLayout({
-    entries : [ {binding : 0, visibility : GPUShaderStage.FRAGMENT, buffer : {type : 'uniform'}} ]
+    entries : [ {
+      binding : 0,
+      visibility : GPUShaderStage.FRAGMENT,
+      buffer : {type : 'uniform'},
+    } ]
   });
 
   // Create bind group for uniform buffer based on above layout
@@ -198,75 +304,8 @@ async function main() {
     } ],
   });
 
-  if (AUDIO) {
-    audioContext = new AudioContext();
-
-    // Create audio buffer
-    let webAudioBuffer = audioContext.createBuffer(2, AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT,
-                                                   audioContext.sampleRate);
-    console.log('Max audio length: ' +
-                (webAudioBuffer.length / audioContext.sampleRate / 60).toFixed(2) + ' minutes');
-
-    // Create texture target for audio
-    let audioTexture = device.createTexture({
-      size : [ AUDIO_BUFFER_WIDTH, AUDIO_BUFFER_HEIGHT ],
-      format : 'rg32float',
-      usage : GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
-    });
-
-    // Setup pipeline to render audio to texture
-    renderPassDescriptor = createRenderPassDescriptor(audioTexture.createView());
-    pipeline = await createPipeline(vertexShader, audioShader, 'rg32float', uniformBindGroupLayout);
-
-    // Write to uniform buffer
-    writeBufferData(uniformBuffer,
-                    [ AUDIO_BUFFER_WIDTH, AUDIO_BUFFER_HEIGHT, audioContext.sampleRate, 0.0 ]);
-
-    // Render audio
-    encodePassAndSubmitCommandBuffer(renderPassDescriptor, pipeline, uniformBindGroup);
-
-    // Create buffer where we can copy our audio texture to
-    const audioBuffer = device.createBuffer({
-      usage : GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-      size : AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT * 8,
-    });
-
-    // Copy texture to audio buffer
-    const commandEncoder = device.createCommandEncoder();
-
-    commandEncoder.copyTextureToBuffer(
-        {texture : audioTexture}, {buffer : audioBuffer, bytesPerRow : AUDIO_BUFFER_WIDTH * 2 * 4},
-        [ AUDIO_BUFFER_WIDTH, AUDIO_BUFFER_HEIGHT ]);
-
-    device.queue.submit([ commandEncoder.finish() ]);
-
-    // Map audio buffer for CPU to read
-    await audioBuffer.mapAsync(GPUMapMode.READ);
-    const audioData = new Float32Array(audioBuffer.getMappedRange());
-
-    // Feed data to web audio
-    const channel0 = webAudioBuffer.getChannelData(0);
-    const channel1 = webAudioBuffer.getChannelData(1);
-    for (let i = 0; i < AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT; i++) {
-      channel0[i] = audioData[(i << 1) + 0];
-      channel1[i] = audioData[(i << 1) + 1];
-    }
-
-    // Release GPU buffer
-    audioBuffer.unmap();
-
-    // Prepare audio buffer source node and connect it to output device
-    audioBufferSourceNode = audioContext.createBufferSource();
-    audioBufferSourceNode.buffer = webAudioBuffer;
-    audioBufferSourceNode.connect(audioContext.destination);
-  } else {
-    renderPassDescriptor = createRenderPassDescriptor(null);
-  }
-
-  // Setup canvas and configure WebGPU context
-  setupCanvasAndContext();
-
   // Setup pipeline to render actual graphics
+  renderPassDescriptor = createRenderPassDescriptor(undefined);
   pipeline =
       await createPipeline(vertexShader, videoShader, presentationFormat, uniformBindGroupLayout);
 
@@ -295,4 +334,3 @@ async function main() {
 }
 
 main();
-
