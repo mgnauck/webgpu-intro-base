@@ -1,0 +1,4 @@
+BasedOnStyle: LLVM
+---
+Language: JavaScript
+ColumnLimit: 100
