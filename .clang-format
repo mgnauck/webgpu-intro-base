@@ -1,4 +1,4 @@
-BasedOnStyle: LLVM
+BasedOnStyle: Chromium
 ---
 Language: JavaScript
-ColumnLimit: 100
+ColumnLimit: 120
