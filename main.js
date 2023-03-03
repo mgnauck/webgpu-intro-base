@@ -2,7 +2,7 @@
 
 const FULLSCREEN = false;
 const AUDIO = true;
-const SHADER_RELOAD = true;
+const SHADER_RELOAD = false;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 400 * ASPECT;
@@ -240,6 +240,7 @@ async function main() {
   }
 
   if (AUDIO) {
+
     audioContext = new AudioContext();
 
     let audioBuffer = audioContext.createBuffer(2, AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT, audioContext.sampleRate);
