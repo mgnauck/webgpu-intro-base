@@ -8,29 +8,77 @@ const ASPECT = 1.6;
 const CANVAS_WIDTH = 400 * ASPECT;
 const CANVAS_HEIGHT = 400;
 
-const AUDIO_BUFFER_WIDTH = 1024;
-const AUDIO_BUFFER_HEIGHT = 1024;
+const AUDIO_BUFFER_WIDTH = 4096;
+const AUDIO_BUFFER_HEIGHT = 4096;
 
 const audioShader = `
 @group(0) @binding(0) var<storage, read_write> outputBuffer: array<vec2<f32>>;
 
-@compute @workgroup_size(64)
+const BPM: f32 = 160.0;
+const PI: f32 = 3.141592654;
+const TAU: f32 = 6.283185307;
+
+fn time_to_beat(t: f32) -> f32 {
+  return t / 60.0 * BPM;
+}
+
+fn beat_to_time(b: f32) -> f32 {
+  return b / BPM * 60.0;
+}
+
+fn sine(phase: f32) -> f32 {
+  return sin(TAU * phase);
+}
+
+fn rand(co: vec2<f32>) -> f32 {
+  return fract(sin(dot(co, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+}
+
+fn noise(phase: f32) -> vec4<f32> {
+  let uv: vec2<f32> = phase / vec2<f32>(0.512, 0.487);
+  return vec4<f32>(rand(uv));
+}
+
+fn kick(time: f32) -> f32 {
+  let amp: f32 = exp(-5.0 * time);
+  let phase: f32 = 120.0 * time - 15.0 * exp(-60.0 * time);
+  return amp * sine(phase);
+}
+
+fn hi_hat(time: f32) -> vec2<f32> {
+  let amp: f32 = exp(-40.0 * time);
+  return amp * noise(time * 110.0).xy;
+}
+
+@compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-  if (global_id.x >= ${AUDIO_BUFFER_WIDTH} * ${AUDIO_BUFFER_HEIGHT}) {
+  if (global_id.x >= ${AUDIO_BUFFER_WIDTH} || global_id.y >= ${AUDIO_BUFFER_HEIGHT}) {
     return;
   }
 
-  let time: f32 = f32(global_id.x) / 44100.0;
-  let val: f32 = sin(time * 440.0 * 1.2 * 3.1415);
-  outputBuffer[global_id.x] = vec2<f32>(val, val);
+  let idx: u32 = ${AUDIO_BUFFER_WIDTH} * global_id.y + global_id.x;
+  let time: f32 = f32(idx) / 44100.0;
+
+  //let val: f32 = sin(time * 440.0 * 1.2 * 3.1415);
+  //outputBuffer[idx] = vec2<f32>(val, val);
+
+  let beat: f32 = time_to_beat(time);
+
+  // Kick
+  var res = vec2<f32>(0.6 * kick(beat_to_time(beat % 1.0)));
+
+  // Hihat
+  res += 0.3 * hi_hat(beat_to_time((beat + 0.5) % 1.0));
+
+  outputBuffer[idx] = vec2<f32>(clamp(res, vec2<f32>(-1.0), vec2<f32>(1.0)));
+  //*/
 }
 `;
 
 const vertexShader = `
 @vertex
-fn main(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32>
-{  
-  var pos = array<vec2<f32>, 4>(vec2( -1.0, 1.0 ), vec2( -1.0, -1.0 ), vec2( 1.0, 1.0 ), vec2( 1.0, -1.0 ));
+fn main(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+  var pos = array<vec2<f32>, 4>(vec2(-1.0, 1.0), vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(1.0, -1.0));
   return vec4<f32>(pos[vertex_index], 0.0, 1.0);
 }
 `;
@@ -44,8 +92,7 @@ struct Uniforms {
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
 @fragment
-fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32>
-{
+fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
   return vec4<f32>(0.6, 0.3, 0.3, 1.0);
 }
 `;
@@ -88,7 +135,11 @@ function setupCanvasAndContext() {
   // Context
   context = canvas.getContext('webgpu');
 
-  context.configure({device: device, format: presentationFormat, alphaMode: 'opaque'});
+  context.configure({
+    device: device,
+    format: presentationFormat,
+    alphaMode: 'opaque',
+  });
 }
 
 function createRenderPassDescriptor(view) {
@@ -196,8 +247,8 @@ async function main() {
 
     // Create buffer for the audio compute shader to write to
     computeBuffer = device.createBuffer({
-      size: AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT * 2 * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+      size: AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT * 2 * 4,
     });
 
     computeBindGroupLayout = device.createBindGroupLayout({
@@ -232,12 +283,13 @@ async function main() {
     const passEncoder = commandEncoder.beginComputePass();
     passEncoder.setPipeline(computePipeline);
     passEncoder.setBindGroup(0, computeBindGroup);
-    passEncoder.dispatchWorkgroups(Math.ceil(AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT / 64));
+    passEncoder.dispatchWorkgroups(Math.ceil(AUDIO_BUFFER_WIDTH / 8), Math.ceil(AUDIO_BUFFER_HEIGHT / 8));
     passEncoder.end();
 
     // Copy computed buffer to read buffer
     commandEncoder.copyBufferToBuffer(
         computeBuffer, 0, readBuffer, 0, AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT * 2 * 4);
+
     // Submit command buffer
     device.queue.submit([commandEncoder.finish()]);
 
