@@ -5,8 +5,8 @@ const AUDIO = true;
 const SHADER_RELOAD = false;
 
 const ASPECT = 1.6;
-const CANVAS_WIDTH = 400 * ASPECT;
-const CANVAS_HEIGHT = 400;
+const CANVAS_WIDTH = 1920;
+const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 
 const AUDIO_BUFFER_WIDTH = 4096;
 const AUDIO_BUFFER_HEIGHT = 4096;
@@ -196,6 +196,19 @@ function encodePassAndSubmitCommandBuffer(renderPassDescriptor, pipeline, bindGr
   device.queue.submit([commandEncoder.finish()]);
 }
 
+function setupPerformanceTimer(timerName) {
+  let begin = performance.now();
+
+  device.queue.onSubmittedWorkDone()
+      .then(() => {
+        let end = performance.now();
+        console.log(`${timerName} (ms): ${(end - begin).toFixed(2)}`);
+      })
+      .catch((err) => {
+        console.log(err);
+      });
+}
+
 function render(time) {
   if (audioContext === undefined && start === undefined) {
     start = time;
@@ -204,6 +217,7 @@ function render(time) {
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
   writeBufferData(
       uniformBuffer, [CANVAS_WIDTH, CANVAS_HEIGHT, AUDIO ? audioContext.currentTime * 1000.0 : (time - start), 0.0]);
+  // setupPerformanceTimer('Render frame');
   encodePassAndSubmitCommandBuffer(renderPassDescriptor, pipeline, uniformBindGroup);
 
   requestAnimationFrame(render);
@@ -240,7 +254,6 @@ async function main() {
   }
 
   if (AUDIO) {
-
     audioContext = new AudioContext();
 
     let audioBuffer = audioContext.createBuffer(2, AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT, audioContext.sampleRate);
@@ -290,6 +303,8 @@ async function main() {
     // Copy computed buffer to read buffer
     commandEncoder.copyBufferToBuffer(
         computeBuffer, 0, readBuffer, 0, AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT * 2 * 4);
+
+    setupPerformanceTimer('Render audio');
 
     // Submit command buffer
     device.queue.submit([commandEncoder.finish()]);
