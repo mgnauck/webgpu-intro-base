@@ -1,16 +1,16 @@
 const FULLSCREEN = false;
 const AUDIO = true;
-const SHADER_RELOAD = true;
+const SHADER_RELOAD = false;
 
 const ASPECT = 1.6;
-const CANVAS_WIDTH = 1920;
+const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 
-const AUDIO_BUFFER_WIDTH = 4096;
-const AUDIO_BUFFER_HEIGHT = 4096;
+const AUDIO_WIDTH = 4096;
+const AUDIO_HEIGHT = 4096;
 
 const audioShader = `
-@group(0) @binding(0) var<storage, read_write> outputBuffer: array<vec2<f32>>;
+@group(0) @binding(0) var outputTexture: texture_storage_2d<rg32float, write>;
 
 const BPM: f32 = 160.0;
 const PI: f32 = 3.141592654;
@@ -50,17 +50,11 @@ fn hi_hat(time: f32) -> vec2<f32> {
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-  if (global_id.x >= ${AUDIO_BUFFER_WIDTH} ||
-    global_id.y >= ${AUDIO_BUFFER_HEIGHT}) {
+  if (global_id.x >= ${AUDIO_WIDTH} || global_id.y >= ${AUDIO_HEIGHT}) {
     return;
   }
 
-  let idx: u32 = ${AUDIO_BUFFER_WIDTH} * global_id.y + global_id.x;
-  let time: f32 = f32(idx) / 44100.0;
-
-  //let val: f32 = sin(time * 440.0 * 1.2 * 3.1415);
-  //outputBuffer[idx] = vec2<f32>(val, val);
-
+  let time: f32 = f32(${AUDIO_WIDTH} * global_id.y + global_id.x) / 44100.0;
   let beat: f32 = time_to_beat(time);
 
   // Kick
@@ -69,7 +63,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   // Hihat
   res += 0.3 * hi_hat(beat_to_time((beat + 0.5) % 1.0));
 
-  outputBuffer[idx] = vec2<f32>(clamp(res, vec2<f32>(-1.0), vec2<f32>(1.0)));
+  textureStore(
+    outputTexture,
+    vec2<u32>(global_id.x, global_id.y),
+    vec4<f32>(clamp(res, vec2<f32>(-1.0), vec2<f32>(1.0)), 0.0, 1.0));
 }
 `;
 
@@ -246,33 +243,33 @@ async function prepareAudio() {
   audioContext = new AudioContext();
 
   let audioBuffer = audioContext.createBuffer(
-      2, AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT, audioContext.sampleRate);
+      2, AUDIO_WIDTH * AUDIO_HEIGHT, audioContext.sampleRate);
   console.log(
       "Max audio length: " +
-      (audioBuffer.length / audioContext.sampleRate / 60).toFixed(2) +
-      " minutes");
+      (audioBuffer.length / audioContext.sampleRate / 60).toFixed(2) + " min");
 
-  let computeBuffer = device.createBuffer({
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-    size: AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT * 2 * 4
+  let computeTexture = device.createTexture({
+    format: "rg32float",
+    usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC,
+    size: [AUDIO_WIDTH, AUDIO_HEIGHT]
   });
 
   let computeBindGroupLayout = device.createBindGroupLayout({
     entries: [{
       binding: 0,
       visibility: GPUShaderStage.COMPUTE,
-      buffer: {type: "storage"}
+      storageTexture: {format: "rg32float"}
     }]
   });
 
   let computeBindGroup = device.createBindGroup({
     layout: computeBindGroupLayout,
-    entries: [{binding: 0, resource: {buffer: computeBuffer}}]
+    entries: [{binding: 0, resource: computeTexture.createView()}]
   });
 
   const readBuffer = device.createBuffer({
     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-    size: AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT * 2 * 4
+    size: AUDIO_WIDTH * AUDIO_HEIGHT * 2 * 4
   });
 
   let computePipeline =
@@ -283,12 +280,13 @@ async function prepareAudio() {
   passEncoder.setPipeline(computePipeline);
   passEncoder.setBindGroup(0, computeBindGroup);
   passEncoder.dispatchWorkgroups(
-      Math.ceil(AUDIO_BUFFER_WIDTH / 8), Math.ceil(AUDIO_BUFFER_HEIGHT / 8));
+      Math.ceil(AUDIO_WIDTH / 8), Math.ceil(AUDIO_HEIGHT / 8));
   passEncoder.end();
 
-  commandEncoder.copyBufferToBuffer(
-      computeBuffer, 0, readBuffer, 0,
-      AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT * 2 * 4);
+  commandEncoder.copyTextureToBuffer(
+      {texture: computeTexture},
+      {buffer: readBuffer, bytesPerRow: AUDIO_WIDTH * 2 * 4},
+      [AUDIO_WIDTH, AUDIO_HEIGHT]);
 
   setupPerformanceTimer("Render audio");
 
@@ -301,7 +299,7 @@ async function prepareAudio() {
   const channel1 = audioBuffer.getChannelData(1);
 
   let i;
-  for (i = 0; i < AUDIO_BUFFER_WIDTH * AUDIO_BUFFER_HEIGHT; i += 1) {
+  for (i = 0; i < AUDIO_WIDTH * AUDIO_HEIGHT; i += 1) {
     channel0[i] = audioData[(i << 1) + 0];
     channel1[i] = audioData[(i << 1) + 1];
   }
