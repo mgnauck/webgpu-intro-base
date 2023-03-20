@@ -139,7 +139,7 @@ function createRenderPassDescriptor(view) {
   };
 }
 
-function createPipeline(
+async function createPipeline(
     vertexShaderCode, fragmentShaderCode, presentationFormat, bindGroupLayout) {
   return device.createRenderPipelineAsync({
     layout: (bindGroupLayout === undefined) ?
@@ -158,7 +158,7 @@ function createPipeline(
   });
 }
 
-function createComputePipeline(shaderCode, bindGroupLayout) {
+async function createComputePipeline(shaderCode, bindGroupLayout) {
   return device.createComputePipelineAsync({
     layout: (bindGroupLayout === undefined) ?
         "auto" :
