@@ -1,6 +1,5 @@
 const FULLSCREEN = false;
 const AUDIO = true;
-const SHADER_RELOAD = false;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 800;
@@ -10,8 +9,6 @@ const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
 
 const audioShader = `
-@group(0) @binding(0) var outputTexture: texture_storage_2d<rg32float, write>;
-
 const BPM: f32 = 160.0;
 const PI: f32 = 3.141592654;
 const TAU: f32 = 6.283185307;
@@ -48,8 +45,11 @@ fn hi_hat(time: f32) -> vec2<f32> {
   return amp * noise(time * 110.0).xy;
 }
 
+@group(0) @binding(0) var outputTexture: texture_storage_2d<rg32float, write>;
+
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+  
   if (global_id.x >= ${AUDIO_WIDTH} || global_id.y >= ${AUDIO_HEIGHT}) {
     return;
   }
@@ -70,27 +70,60 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 `;
 
-const vertexShader = `
-@vertex
-fn main(@builtin(vertex_index) vertex_index: u32)
-  -> @builtin(position) vec4<f32> {
-  var pos = array<vec2<f32>, 4>(
-    vec2(-1.0, 1.0), vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(1.0, -1.0));
-  return vec4<f32>(pos[vertex_index], 0.0, 1.0);
-}
-`;
-
-const videoShaderFile = "http://localhost:8000/fragmentShader.wgsl";
-const videoShader = `
+const contentShader = `
 struct Uniforms {
   resolution: vec2<f32>,
   time: f32,
 }
-@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+
+@group(0) @binding(0) var outputTexture: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(1) var<uniform> uniforms: Uniforms;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+
+  if (global_id.x >= ${CANVAS_WIDTH} || global_id.y >= ${CANVAS_HEIGHT}) {
+    return;
+  }
+
+  var uv = vec2<f32>(f32(global_id.x) / ${CANVAS_WIDTH}.0, f32(global_id.y) / ${CANVAS_HEIGHT}.0);
+  var col = vec3<f32>(0.5 + 0.5 * cos(uniforms.time + uv.xyx + vec3<f32>(0.0, 2.0, 4.0)));
+
+  textureStore(
+    outputTexture,
+    vec2<u32>(global_id.x, global_id.y),
+    vec4<f32>(col, 1.0));
+}
+`;
+
+const vertexShader = `
+struct Output {
+  @builtin(position) position: vec4<f32>,
+  @location(0) texCoord: vec2<f32>
+}
+
+@vertex
+fn main(@builtin(vertex_index) vertex_index: u32) -> Output {
+
+  var pos = array<vec2<f32>, 4>(
+    vec2(-1.0, 1.0), vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(1.0, -1.0));
+  
+  var output: Output;
+
+  output.position = vec4<f32>(pos[vertex_index], 0.0, 1.0);
+  output.texCoord = pos[vertex_index] * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);
+
+  return output;
+}
+`;
+
+const blitShader = `
+@group(0) @binding(0) var inputTexture: texture_2d<f32>;
+@group(0) @binding(1) var blitSampler: sampler;
 
 @fragment
-fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
-  return vec4<f32>(0.6, 0.3, 0.3, 1.0);
+fn main(@location(0) texCoord: vec2<f32>) -> @location(0) vec4<f32> {
+  return textureSample(inputTexture, blitSampler, texCoord);
 }
 `;
 
@@ -98,20 +131,24 @@ let audioContext;
 let audioBufferSourceNode;
 
 let device;
-let uniformBuffer;
-let uniformBindGroupLayout;
-let uniformBindGroup;
-let renderPassDescriptor;
-let pipeline;
+
+let contentTextureView;
+let contentUniformBuffer;
+let contentBindGroup;
+let contentPipeline;
+
+let blitBindGroup;
+let blitPassDescriptor;
+let blitPipeline;
 
 let canvas;
 let context;
 let presentationFormat;
 
 let start;
-let reloadData;
 
 function setupCanvasAndContext() {
+  
   document.body.innerHTML = "<button>CLICK<canvas style='width:0;cursor:none'>";
   canvas = document.querySelector("canvas");
   canvas.width = CANVAS_WIDTH;
@@ -128,19 +165,60 @@ function setupCanvasAndContext() {
   context.configure({device, format: presentationFormat, alphaMode: "opaque"});
 }
 
+function writeBufferData(buffer, data) {
+ 
+  const bufferData = new Float32Array(data);
+  
+  device.queue.writeBuffer(
+      buffer, 0, bufferData.buffer, bufferData.byteOffset,
+      bufferData.byteLength);
+}
+
+async function createComputePipeline(shaderCode, bindGroupLayout) {
+
+  return device.createComputePipelineAsync({
+    layout: (bindGroupLayout === undefined) ?
+        "auto" :
+        device.createPipelineLayout({bindGroupLayouts: [bindGroupLayout]}),
+    compute: {
+      module: device.createShaderModule({code: shaderCode}),
+      entryPoint: "main"
+    }
+  });
+}
+
+function encodeComputePassAndSubmit(
+  pipeline, bindGroup, workgroupCountX, workgroupCountY, preSubmitOperation) {
+  
+  const commandEncoder = device.createCommandEncoder();
+
+  const passEncoder = commandEncoder.beginComputePass();
+  passEncoder.setPipeline(pipeline);
+  passEncoder.setBindGroup(0, bindGroup);
+  passEncoder.dispatchWorkgroups(workgroupCountX, workgroupCountY);
+  passEncoder.end();
+
+  if(preSubmitOperation != undefined) {
+    preSubmitOperation(commandEncoder);
+  }
+
+  device.queue.submit([commandEncoder.finish()]);
+}
+
 function createRenderPassDescriptor(view) {
   return {
     colorAttachments: [{
       view,
-      clearValue: {r: 0.3, g: 0.3, b: 0.3, a: 1.0},
+      clearValue: {r: 1.0, g: 0.0, b: 0.0, a: 1.0},
       loadOp: "clear",
       storeOp: "store"
     }]
   };
 }
 
-async function createPipeline(
+async function createRenderPipeline(
     vertexShaderCode, fragmentShaderCode, presentationFormat, bindGroupLayout) {
+
   return device.createRenderPipelineAsync({
     layout: (bindGroupLayout === undefined) ?
         "auto" :
@@ -158,30 +236,11 @@ async function createPipeline(
   });
 }
 
-async function createComputePipeline(shaderCode, bindGroupLayout) {
-  return device.createComputePipelineAsync({
-    layout: (bindGroupLayout === undefined) ?
-        "auto" :
-        device.createPipelineLayout({bindGroupLayouts: [bindGroupLayout]}),
-    compute: {
-      module: device.createShaderModule({code: shaderCode}),
-      entryPoint: "main"
-    }
-  });
-}
-
-function writeBufferData(buffer, data) {
-  const bufferData = new Float32Array(data);
-  device.queue.writeBuffer(
-      buffer, 0, bufferData.buffer, bufferData.byteOffset,
-      bufferData.byteLength);
-}
-
-function encodePassAndSubmitCommandBuffer(
-    renderPassDescriptor, pipeline, bindGroup) {
+function encodeBlitPassAndSubmit(passDescriptor, pipeline, bindGroup) {
+  
   const commandEncoder = device.createCommandEncoder();
 
-  const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
+  const passEncoder = commandEncoder.beginRenderPass(passDescriptor);
   passEncoder.setPipeline(pipeline);
   passEncoder.setBindGroup(0, bindGroup);
   passEncoder.draw(4);
@@ -190,8 +249,32 @@ function encodePassAndSubmitCommandBuffer(
   device.queue.submit([commandEncoder.finish()]);
 }
 
+function render(time) {
+
+  if (audioContext === undefined && start === undefined) {
+    start = time;
+  }
+
+  writeBufferData(contentUniformBuffer, [
+    CANVAS_WIDTH, CANVAS_HEIGHT,
+    AUDIO ? audioContext.currentTime : ((time - start) / 1000.0), 0.0
+  ]);
+
+  encodeComputePassAndSubmit(
+    contentPipeline, contentBindGroup, 
+    Math.ceil(CANVAS_WIDTH / 8), Math.ceil(CANVAS_HEIGHT / 8));
+
+  blitPassDescriptor.colorAttachments[0].view =
+      context.getCurrentTexture().createView();
+  encodeBlitPassAndSubmit(blitPassDescriptor, blitPipeline, blitBindGroup);
+
+  requestAnimationFrame(render);
+}
+
 function setupPerformanceTimer(timerName) {
+  
   let begin = performance.now();
+  
   device.queue.onSubmittedWorkDone()
       .then(function() {
         let end = performance.now();
@@ -202,44 +285,8 @@ function setupPerformanceTimer(timerName) {
       });
 }
 
-function render(time) {
-  if (audioContext === undefined && start === undefined) {
-    start = time;
-  }
-
-  renderPassDescriptor.colorAttachments[0].view =
-      context.getCurrentTexture().createView();
-
-  writeBufferData(uniformBuffer, [
-    CANVAS_WIDTH, CANVAS_HEIGHT,
-    AUDIO ? audioContext.currentTime * 1000.0 : (time - start), 0.0
-  ]);
-
-  // setupPerformanceTimer('Render frame');
-
-  encodePassAndSubmitCommandBuffer(
-      renderPassDescriptor, pipeline, uniformBindGroup);
-
-  requestAnimationFrame(render);
-}
-
-function setupShaderReload(url, reloadData, timeout) {
-  setInterval(async function() {
-    const response = await fetch(url);
-    const data = await response.text();
-
-    if (data !== reloadData) {
-      pipeline = await createPipeline(
-          vertexShader, data, presentationFormat, uniformBindGroupLayout);
-
-      reloadData = data;
-
-      console.log("Reloaded " + url);
-    }
-  }, timeout);
-}
-
-async function prepareAudio() {
+async function renderAudio() {
+ 
   audioContext = new AudioContext();
 
   let audioBuffer = audioContext.createBuffer(
@@ -248,13 +295,13 @@ async function prepareAudio() {
       "Max audio length: " +
       (audioBuffer.length / audioContext.sampleRate / 60).toFixed(2) + " min");
 
-  let computeTexture = device.createTexture({
+   let audioTexture = device.createTexture({
     format: "rg32float",
     usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC,
     size: [AUDIO_WIDTH, AUDIO_HEIGHT]
   });
 
-  let computeBindGroupLayout = device.createBindGroupLayout({
+  let audioBindGroupLayout = device.createBindGroupLayout({
     entries: [{
       binding: 0,
       visibility: GPUShaderStage.COMPUTE,
@@ -262,9 +309,9 @@ async function prepareAudio() {
     }]
   });
 
-  let computeBindGroup = device.createBindGroup({
-    layout: computeBindGroupLayout,
-    entries: [{binding: 0, resource: computeTexture.createView()}]
+  let audioBindGroup = device.createBindGroup({
+    layout: audioBindGroupLayout,
+    entries: [{binding: 0, resource: audioTexture.createView()}]
   });
 
   const readBuffer = device.createBuffer({
@@ -272,25 +319,18 @@ async function prepareAudio() {
     size: AUDIO_WIDTH * AUDIO_HEIGHT * 2 * 4
   });
 
-  let computePipeline =
-      await createComputePipeline(audioShader, computeBindGroupLayout);
-  let commandEncoder = device.createCommandEncoder();
-
-  const passEncoder = commandEncoder.beginComputePass();
-  passEncoder.setPipeline(computePipeline);
-  passEncoder.setBindGroup(0, computeBindGroup);
-  passEncoder.dispatchWorkgroups(
-      Math.ceil(AUDIO_WIDTH / 8), Math.ceil(AUDIO_HEIGHT / 8));
-  passEncoder.end();
-
-  commandEncoder.copyTextureToBuffer(
-      {texture: computeTexture},
-      {buffer: readBuffer, bytesPerRow: AUDIO_WIDTH * 2 * 4},
-      [AUDIO_WIDTH, AUDIO_HEIGHT]);
-
   setupPerformanceTimer("Render audio");
 
-  device.queue.submit([commandEncoder.finish()]);
+  encodeComputePassAndSubmit(
+    await createComputePipeline(audioShader, audioBindGroupLayout),
+    audioBindGroup,
+    Math.ceil(AUDIO_WIDTH / 8), Math.ceil(AUDIO_HEIGHT / 8),
+    function(commandEncoder) {
+      commandEncoder.copyTextureToBuffer(
+        {texture: audioTexture},
+        {buffer: readBuffer, bytesPerRow: AUDIO_WIDTH * 2 * 4},
+        [AUDIO_WIDTH, AUDIO_HEIGHT]);  
+    });
 
   await readBuffer.mapAsync(GPUMapMode.READ);
   const audioData = new Float32Array(readBuffer.getMappedRange());
@@ -311,7 +351,113 @@ async function prepareAudio() {
   audioBufferSourceNode.connect(audioContext.destination);
 }
 
+async function prepareContentResources() {
+
+  let contentTexture = device.createTexture({
+    format: "rgba8unorm",
+    usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
+    size: [CANVAS_WIDTH, CANVAS_HEIGHT]
+  });
+
+  contentTextureView = contentTexture.createView();
+
+  contentUniformBuffer = device.createBuffer(
+      {size: 4 * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
+
+  const contentBindGroupLayout = device.createBindGroupLayout({
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.COMPUTE,
+        storageTexture: {format: "rgba8unorm"}
+      },
+      {
+        binding: 1,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: {type: "uniform"}
+      }
+    ]
+  });
+
+  contentBindGroup = device.createBindGroup({
+    layout: contentBindGroupLayout,
+    entries: [
+      {
+        binding: 0,
+        resource: contentTextureView
+      },
+      {
+        binding: 1,
+        resource: {buffer: contentUniformBuffer}
+      }
+    ]
+  });
+  
+  contentPipeline = await createComputePipeline(
+    contentShader, contentBindGroupLayout);
+}
+
+async function prepareBlitResources() {
+
+  let blitSampler = device.createSampler({
+    magFilter: "linear"
+  });
+
+  let blitBindGroupLayout = device.createBindGroupLayout({
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.FRAGMENT,
+        texture: {}
+      },
+      {
+        binding: 1,
+        visibility: GPUShaderStage.FRAGMENT,
+        sampler: {}
+      }
+    ]
+  });
+
+  blitBindGroup = device.createBindGroup({
+    layout: blitBindGroupLayout,
+    entries: [
+      {
+        binding: 0,
+        resource: contentTextureView
+      },
+      {
+        binding: 1,
+        resource: blitSampler
+      }
+    ]
+  });
+
+  blitPassDescriptor = createRenderPassDescriptor(undefined);
+  blitPipeline = await createRenderPipeline(
+      vertexShader, blitShader, presentationFormat, blitBindGroupLayout);
+}
+
+function startRender() {
+
+  if (FULLSCREEN) {
+    canvas.requestFullscreen();
+  } else {
+    canvas.style.width = CANVAS_WIDTH;
+    canvas.style.height = CANVAS_HEIGHT;
+    canvas.style.position = "absolute";
+    canvas.style.left = 0;
+    canvas.style.top = 0;
+  }
+
+  if (AUDIO) {
+    audioBufferSourceNode.start();
+  }
+
+  requestAnimationFrame(render);
+}
+
 async function main() {
+
   if (!navigator.gpu) {
     throw new Error("WebGPU is not supported on this browser.");
   }
@@ -327,52 +473,19 @@ async function main() {
   }
 
   if (AUDIO) {
-    await prepareAudio();
+    await renderAudio();
   }
-
-  setupCanvasAndContext();
-
-  uniformBuffer = device.createBuffer(
-      {size: 4 * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
-
-  uniformBindGroupLayout = device.createBindGroupLayout({
-    entries: [{
-      binding: 0,
-      visibility: GPUShaderStage.FRAGMENT,
-      buffer: {type: "uniform"}
-    }]
-  });
-
-  uniformBindGroup = device.createBindGroup({
-    layout: uniformBindGroupLayout,
-    entries: [{binding: 0, resource: {buffer: uniformBuffer}}]
-  });
-
-  renderPassDescriptor = createRenderPassDescriptor(undefined);
-  pipeline = await createPipeline(
-      vertexShader, videoShader, presentationFormat, uniformBindGroupLayout);
-
-  document.querySelector("button").addEventListener("click", function(e) {
-    if (FULLSCREEN) {
-      canvas.requestFullscreen();
-    } else {
-      canvas.style.width = CANVAS_WIDTH;
-      canvas.style.height = CANVAS_HEIGHT;
-      canvas.style.position = "absolute";
-      canvas.style.left = 0;
-      canvas.style.top = 0;
-    }
-
-    if (AUDIO) {
-      audioBufferSourceNode.start();
-    }
-
-    requestAnimationFrame(render);
-
-    if (SHADER_RELOAD) {
-      setupShaderReload(videoShaderFile, reloadData, 1000);
-    }
-  });
+  
+  setupCanvasAndContext(); 
+ 
+  await prepareContentResources();
+  await prepareBlitResources();
+  
+  if(AUDIO) {
+    document.querySelector("button").addEventListener("click", startRender);
+  } else {
+    startRender();
+  }
 }
 
 main();
