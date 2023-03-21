@@ -86,8 +86,10 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
     return;
   }
 
-  let uv = vec2<f32>(f32(globalId.x) / ${CANVAS_WIDTH}.0, f32(globalId.y) / ${
-    CANVAS_HEIGHT}.0);
+  let uv = vec2<f32>(
+    f32(globalId.x) / ${CANVAS_WIDTH}.0,
+    f32(globalId.y) / ${CANVAS_HEIGHT}.0);
+
   let col = vec3<f32>(0.5 + 0.5 * cos(uniforms.time + uv.xyx + vec3<f32>(0.0, 2.0, 4.0)));
 
   textureStore(
