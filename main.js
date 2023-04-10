@@ -1,5 +1,5 @@
 const FULLSCREEN = false;
-const AUDIO = true;
+const AUDIO = false;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 800;
@@ -7,128 +7,6 @@ const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 
 const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
-
-const audioShader = `
-const BPM: f32 = 160.0;
-const PI: f32 = 3.141592654;
-const TAU: f32 = 6.283185307;
-
-fn timeToBeat(t: f32) -> f32 {
-  return t / 60.0 * BPM;
-}
-
-fn beatToTime(b: f32) -> f32 {
-  return b / BPM * 60.0;
-}
-
-fn sine(phase: f32) -> f32 {
-  return sin(TAU * phase);
-}
-
-fn rand(co: vec2<f32>) -> f32 {
-  return fract(sin(dot(co, vec2<f32>(12.9898, 78.233))) * 43758.5453);
-}
-
-fn noise(phase: f32) -> vec4<f32> {
-  let uv: vec2<f32> = phase / vec2<f32>(0.512, 0.487);
-  return vec4<f32>(rand(uv));
-}
-
-fn kick(time: f32) -> f32 {
-  let amp: f32 = exp(-5.0 * time);
-  let phase: f32 = 120.0 * time - 15.0 * exp(-60.0 * time);
-  return amp * sine(phase);
-}
-
-fn hiHat(time: f32) -> vec2<f32> {
-  let amp: f32 = exp(-40.0 * time);
-  return amp * noise(time * 110.0).xy;
-}
-
-@group(0) @binding(0) var outputTexture: texture_storage_2d<rg32float, write>;
-
-@compute @workgroup_size(8, 8)
-fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
-  
-  if (globalId.x >= ${AUDIO_WIDTH} || globalId.y >= ${AUDIO_HEIGHT}) {
-    return;
-  }
-
-  let time: f32 = f32(${AUDIO_WIDTH} * globalId.y + globalId.x) / 44100.0;
-  let beat: f32 = timeToBeat(time);
-
-  // Kick
-  var res = vec2<f32>(0.6 * kick(beatToTime(beat % 1.0)));
-
-  // Hihat
-  res += 0.3 * hiHat(beatToTime((beat + 0.5) % 1.0));
-
-  textureStore(
-    outputTexture,
-    vec2<u32>(globalId.x, globalId.y),
-    vec4<f32>(clamp(res, vec2<f32>(-1.0), vec2<f32>(1.0)), 0.0, 1.0));
-}
-`;
-
-const contentShader = `
-struct Uniforms {
-  resolution: vec2<f32>,
-  time: f32,
-}
-
-@group(0) @binding(0) var outputTexture: texture_storage_2d<rgba8unorm, write>;
-@group(0) @binding(1) var<uniform> uniforms: Uniforms;
-
-@compute @workgroup_size(8, 8)
-fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
-
-  if (globalId.x >= ${CANVAS_WIDTH} || globalId.y >= ${CANVAS_HEIGHT}) {
-    return;
-  }
-
-  let uv = vec2<f32>(
-    f32(globalId.x) / ${CANVAS_WIDTH}.0,
-    f32(globalId.y) / ${CANVAS_HEIGHT}.0);
-
-  let col = vec3<f32>(0.5 + 0.5 * cos(uniforms.time + uv.xyx + vec3<f32>(0.0, 2.0, 4.0)));
-
-  textureStore(
-    outputTexture,
-    vec2<u32>(globalId.x, globalId.y),
-    vec4<f32>(col, 1.0));
-}
-`;
-
-const vertexShader = `
-struct Output {
-  @builtin(position) position: vec4<f32>,
-  @location(0) texCoord: vec2<f32>
-}
-
-@vertex
-fn main(@builtin(vertex_index) vertexIndex: u32) -> Output {
-
-  let pos = array<vec2<f32>, 4>(
-    vec2(-1.0, 1.0), vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(1.0, -1.0));
-  
-  var output: Output;
-
-  output.position = vec4<f32>(pos[vertexIndex], 0.0, 1.0);
-  output.texCoord = pos[vertexIndex] * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);
-
-  return output;
-}
-`;
-
-const blitShader = `
-@group(0) @binding(0) var inputTexture: texture_2d<f32>;
-@group(0) @binding(1) var blitSampler: sampler;
-
-@fragment
-fn main(@location(0) texCoord: vec2<f32>) -> @location(0) vec4<f32> {
-  return textureSample(inputTexture, blitSampler, texCoord);
-}
-`;
 
 let audioContext;
 let audioBufferSourceNode;
@@ -148,6 +26,10 @@ let canvas;
 let context;
 
 let start;
+
+function loadTextFile(url) {
+  return fetch(url).then(response => response.text());
+}
 
 function setupCanvasAndContext() {
   document.body.innerHTML = "<button>CLICK<canvas style='width:0;cursor:none'>";
@@ -281,7 +163,8 @@ async function renderAudio() {
   setupPerformanceTimer("Render audio");
 
   encodeComputePassAndSubmit(
-      await createComputePipeline(audioShader, audioBindGroupLayout),
+      await createComputePipeline(
+          await loadTextFile("audioShader.wgsl"), audioBindGroupLayout),
       audioBindGroup, Math.ceil(AUDIO_WIDTH / 8), Math.ceil(AUDIO_HEIGHT / 8),
       function(commandEncoder) {
         commandEncoder.copyTextureToBuffer(
@@ -343,8 +226,8 @@ async function prepareContentResources() {
     ]
   });
 
-  contentPipeline =
-      await createComputePipeline(contentShader, contentBindGroupLayout);
+  contentPipeline = await createComputePipeline(
+      await loadTextFile("contentShader.wgsl"), contentBindGroupLayout);
 }
 
 async function prepareBlitResources() {
@@ -366,8 +249,9 @@ async function prepareBlitResources() {
   });
 
   blitPassDescriptor = createRenderPassDescriptor(undefined);
-  blitPipeline =
-      await createRenderPipeline(vertexShader, blitShader, blitBindGroupLayout);
+  blitPipeline = await createRenderPipeline(
+      await loadTextFile("vertexShader.wgsl"),
+      await loadTextFile("blitShader.wgsl"), blitBindGroupLayout);
 }
 
 function render(time) {
