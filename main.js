@@ -264,6 +264,8 @@ function render(time) {
     AUDIO ? audioContext.currentTime : ((time - start) / 1000.0), 0.0
   ]);
 
+  setupPerformanceTimer("Render");
+
   encodeComputePassAndSubmit(
       contentPipeline, contentBindGroup, Math.ceil(CANVAS_WIDTH / 8),
       Math.ceil(CANVAS_HEIGHT / 8));
@@ -281,7 +283,9 @@ function setupPerformanceTimer(timerName) {
   device.queue.onSubmittedWorkDone()
       .then(function() {
         let end = performance.now();
-        console.log(`${timerName} (ms): ${(end - begin).toFixed(2)}`);
+        let frameTime = end - begin;
+        document.title = `${(frameTime).toFixed(2)} / ${(1000.0 / frameTime).toFixed(2)}`;
+        //console.log(`${timerName} (ms): ${(end - begin).toFixed(2)}`);
       })
       .catch(function(err) {
         console.log(err);
