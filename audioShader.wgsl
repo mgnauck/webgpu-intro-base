@@ -14,13 +14,13 @@ fn sine(phase: f32) -> f32 {
   return sin(TAU * phase);
 }
 
-fn rand(co: vec2<f32>) -> f32 {
-  return fract(sin(dot(co, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+fn rand(co: vec2f) -> f32 {
+  return fract(sin(dot(co, vec2f(12.9898, 78.233))) * 43758.5453);
 }
 
-fn noise(phase: f32) -> vec4<f32> {
-  let uv = phase / vec2<f32>(0.512, 0.487);
-  return vec4<f32>(rand(uv));
+fn noise(phase: f32) -> vec4f {
+  let uv = phase / vec2f(0.512, 0.487);
+  return vec4f(rand(uv));
 }
 
 fn kick(time: f32) -> f32 {
@@ -29,7 +29,7 @@ fn kick(time: f32) -> f32 {
   return amp * sine(phase);
 }
 
-fn hiHat(time: f32) -> vec2<f32> {
+fn hiHat(time: f32) -> vec2f {
   let amp = exp(-40.0 * time);
   return amp * noise(time * 110.0).xy;
 }
@@ -37,7 +37,7 @@ fn hiHat(time: f32) -> vec2<f32> {
 @group(0) @binding(0) var outputTexture: texture_storage_2d<rg32float, write>;
 
 @compute @workgroup_size(8, 8)
-fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
+fn main(@builtin(global_invocation_id) globalId: vec3u) {
   
   if (globalId.x >= 4096 || globalId.y >= 4096) {
     return;
@@ -46,12 +46,12 @@ fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
   let time = f32(4096 * globalId.y + globalId.x) / 44100.0;
   let beat = timeToBeat(time);
 
-  var res = vec2<f32>(0.6 * kick(beatToTime(beat % 1.0)));
+  var res = vec2f(0.6 * kick(beatToTime(beat % 1.0)));
 
   res += 0.3 * hiHat(beatToTime((beat + 0.5) % 1.0));
 
   textureStore(
     outputTexture,
-    vec2<u32>(globalId.x, globalId.y),
-    vec4<f32>(clamp(res, vec2<f32>(-1.0), vec2<f32>(1.0)), 0.0, 1.0));
+    vec2u(globalId.x, globalId.y),
+    vec4f(clamp(res, vec2f(-1), vec2f(1)), 0, 1));
 }

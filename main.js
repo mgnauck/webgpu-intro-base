@@ -1,5 +1,5 @@
 const FULLSCREEN = false;
-const AUDIO = false;
+const AUDIO = true;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 800;
