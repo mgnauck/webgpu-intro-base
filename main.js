@@ -8,6 +8,43 @@ const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
 
+const BLIT_SHADER = `
+struct Output {
+  @builtin(position) position: vec4f,
+  @location(0) texCoord: vec2f
+}
+
+@vertex
+fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> Output {
+
+  let pos = array<vec2f, 4>(
+    vec2f(-1, 1), vec2f(-1, -1), vec2f(1, 1), vec2f(1, -1));
+
+  var output: Output;
+
+  let h = vec2f(0.5, 0.5);
+
+  output.position = vec4f(pos[vertexIndex], 0, 1);
+  output.texCoord = pos[vertexIndex] * h + h;
+
+  return output;
+}
+
+@group(0) @binding(0) var inputTexture: texture_2d<f32>;
+
+@fragment
+fn fragmentMain(@location(0) texCoord: vec2f) -> @location(0) vec4f {
+  return textureLoad(
+    inputTexture, 
+    vec2u(texCoord * vec2f(${CANVAS_WIDTH}, ${CANVAS_HEIGHT})),
+    0);
+}
+`;
+
+// External for now
+const AUDIO_SHADER = ``;
+const CONTENT_SHADER = ``;
+
 let audioContext;
 let audioBufferSourceNode;
 
@@ -96,19 +133,16 @@ function createRenderPassDescriptor(view) {
   };
 }
 
-async function createRenderPipeline(
-    vertexShaderCode, fragmentShaderCode, bindGroupLayout) {
+async function createRenderPipeline(shaderCode, bindGroupLayout) {
+  let shaderModule = device.createShaderModule({code: shaderCode});
   return device.createRenderPipelineAsync({
     layout: (bindGroupLayout === undefined) ?
         "auto" :
         device.createPipelineLayout({bindGroupLayouts: [bindGroupLayout]}),
-    vertex: {
-      module: device.createShaderModule({code: vertexShaderCode}),
-      entryPoint: "main"
-    },
+    vertex: {module: shaderModule, entryPoint: "vertexMain"},
     fragment: {
-      module: device.createShaderModule({code: fragmentShaderCode}),
-      entryPoint: "main",
+      module: shaderModule,
+      entryPoint: "fragmentMain",
       targets: [{format: "bgra8unorm"}]
     },
     primitive: {topology: "triangle-strip"}
@@ -179,7 +213,7 @@ async function renderAudio() {
   const channel0 = audioBuffer.getChannelData(0);
   const channel1 = audioBuffer.getChannelData(1);
 
-  for (let i = 0; i < AUDIO_WIDTH * AUDIO_HEIGHT; i += 1) {
+  for (let i = 0; i < AUDIO_WIDTH * AUDIO_HEIGHT; i++) {
     channel0[i] = audioData[(i << 1) + 0];
     channel1[i] = audioData[(i << 1) + 1];
   }
@@ -231,12 +265,9 @@ async function prepareContentResources() {
 }
 
 async function prepareBlitResources() {
-  let blitSampler = device.createSampler({magFilter: "linear"});
-
   let blitBindGroupLayout = device.createBindGroupLayout({
     entries: [
       {binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: {}},
-      {binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: {}}
     ]
   });
 
@@ -244,14 +275,11 @@ async function prepareBlitResources() {
     layout: blitBindGroupLayout,
     entries: [
       {binding: 0, resource: contentTextureView},
-      {binding: 1, resource: blitSampler}
     ]
   });
 
   blitPassDescriptor = createRenderPassDescriptor(undefined);
-  blitPipeline = await createRenderPipeline(
-      await loadTextFile("vertexShader.wgsl"),
-      await loadTextFile("blitShader.wgsl"), blitBindGroupLayout);
+  blitPipeline = await createRenderPipeline(BLIT_SHADER, blitBindGroupLayout);
 }
 
 function render(time) {
@@ -284,8 +312,9 @@ function setupPerformanceTimer(timerName) {
       .then(function() {
         let end = performance.now();
         let frameTime = end - begin;
-        document.title = `${(frameTime).toFixed(2)} / ${(1000.0 / frameTime).toFixed(2)}`;
-        //console.log(`${timerName} (ms): ${(end - begin).toFixed(2)}`);
+        document.title =
+            `${(frameTime).toFixed(2)} / ${(1000.0 / frameTime).toFixed(2)}`;
+        // console.log(`${timerName} (ms): ${(end - begin).toFixed(2)}`);
       })
       .catch(function(err) {
         console.log(err);
