@@ -1,5 +1,7 @@
+import {mat4, utils, vec3} from "https://wgpu-matrix.org/dist/0.x/wgpu-matrix.module.js";
+
 const FULLSCREEN = false;
-const AUDIO = true;
+const AUDIO = false;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 800;
@@ -7,6 +9,10 @@ const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 
 const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
+
+const MOVE_VELOCITY = 0.1;
+const LOOK_VELOCITY = 0.025;
+const WHEEL_VELOCITY = 0.0025;
 
 const BLIT_SHADER = `
 struct Output {
@@ -61,6 +67,10 @@ let blitPipeline;
 
 let canvas;
 let context;
+
+let viewMatrix;
+let eye, dir;
+let programmableValue;
 
 let start;
 
@@ -235,7 +245,8 @@ async function prepareContentResources() {
   contentTextureView = contentTexture.createView();
 
   contentUniformBuffer = device.createBuffer(
-      {size: 4 * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
+      // 4x4 modelview, canvas, time, programmable value
+      {size: 20 * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
 
   const contentBindGroupLayout = device.createBindGroupLayout({
     entries: [
@@ -287,10 +298,12 @@ function render(time) {
     start = time;
   }
 
-  writeBufferData(contentUniformBuffer, [
-    CANVAS_WIDTH, CANVAS_HEIGHT,
-    AUDIO ? audioContext.currentTime : ((time - start) / 1000.0), 0.0
-  ]);
+  writeBufferData(
+      contentUniformBuffer, new Float32Array([
+        ...viewMatrix, CANVAS_WIDTH, CANVAS_HEIGHT,
+        AUDIO ? audioContext.currentTime : ((time - start) / 1000.0),
+        programmableValue
+      ]));
 
   setupPerformanceTimer("Render");
 
@@ -321,6 +334,69 @@ function setupPerformanceTimer(timerName) {
       });
 }
 
+function resetView() {
+  eye = vec3.create(0, 0, 1);
+  dir = vec3.create(0, 0, -1);
+  programmableValue = 0.0;
+}
+
+function computeViewMatrix() {
+  viewMatrix = mat4.lookAt(eye, vec3.add(eye, dir), vec3.create(0, 1, 0));
+}
+
+function handleKeyEvent(e) {
+  switch (e.key) {
+    case "a":
+      vec3.add(
+          eye, vec3.scale(mat4.getAxis(viewMatrix, 0), -MOVE_VELOCITY), eye);
+      break;
+    case "d":
+      vec3.add(
+          eye, vec3.scale(mat4.getAxis(viewMatrix, 0), MOVE_VELOCITY), eye);
+      break;
+    case "w":
+      vec3.add(eye, vec3.scale(dir, MOVE_VELOCITY), eye);
+      break;
+    case "s":
+      vec3.add(eye, vec3.scale(dir, -MOVE_VELOCITY), eye);
+      break;
+    case "r":
+      resetView();
+      break;
+  };
+
+  computeViewMatrix();
+}
+
+function handleMouseMoveEvent(e) {
+  let yaw = -e.movementX * LOOK_VELOCITY;  // negation?
+  let pitch = -e.movementY * LOOK_VELOCITY;
+
+  // Disallow alignment of forward and global up vector
+  const currentPitch = Math.acos(dir[1]);
+  const newPitch = currentPitch - pitch;
+  const minPitch = utils.degToRad(1.0);
+  const maxPitch = utils.degToRad(179.0);
+
+  if (newPitch < minPitch) {
+    pitch = currentPitch - minPitch;
+  }
+  if (newPitch > maxPitch) {
+    pitch = currentPitch - maxPitch;
+  }
+
+  // Pitch locally, yaw globally to avoid unwanted roll
+  vec3.transformMat4(
+      dir, mat4.rotation(mat4.getAxis(viewMatrix, 0), pitch), dir);
+  vec3.transformMat4(dir, mat4.rotationY(yaw), dir);
+
+  computeViewMatrix();
+}
+
+function handleMouseWheelEvent(e) {
+  programmableValue -= e.deltaY * WHEEL_VELOCITY;
+}
+
 function startRender() {
   if (FULLSCREEN) {
     canvas.requestFullscreen();
@@ -331,6 +407,29 @@ function startRender() {
     canvas.style.left = 0;
     canvas.style.top = 0;
   }
+
+  resetView();
+  computeViewMatrix();
+
+  document.querySelector("button").removeEventListener("click", startRender);
+
+  canvas.addEventListener("click", async () => {
+    if (!document.pointerLockElement) {
+      await canvas.requestPointerLock({unadjustedMovement: true});
+    }
+  });
+
+  document.addEventListener("pointerlockchange", () => {
+    if (document.pointerLockElement === canvas) {
+      document.addEventListener("keydown", handleKeyEvent);
+      canvas.addEventListener("mousemove", handleMouseMoveEvent);
+      canvas.addEventListener("wheel", handleMouseWheelEvent);
+    } else {
+      document.removeEventListener("keydown", handleKeyEvent);
+      canvas.removeEventListener("mousemove", handleMouseMoveEvent);
+      canvas.removeEventListener("wheel", handleMouseWheelEvent);
+    }
+  });
 
   if (AUDIO) {
     audioBufferSourceNode.start();

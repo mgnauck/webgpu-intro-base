@@ -1,6 +1,8 @@
 struct Uniforms {
+  cameraToWorld: mat4x4f,
   resolution: vec2f,
   time: f32,
+  value: f32
 }
 
 const INFINITY = 999999.0;
@@ -52,7 +54,7 @@ fn fBox(p: vec3f, b: vec3f) -> f32 {
 }
 
 fn f(p: vec3f) -> f32 {
-  let d = fSphere(p, vec3f(), 1.25);
+  let d = fSphere(p, vec3f(), 1.25 - uniforms.value);
   return min(d, -fBox(p, vec3f(1)));
 }
 
@@ -134,29 +136,18 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
     f32(globalId.x) / width,
     f32(globalId.y) / height);
 
-  let rotX = sin(time * 0.6) * 1.5;
-  let rotY = sin(time * 0.4) * 1.7;
-  let rotZ = sin(time * 0.3) * 1.9;
-
   uv = uv * 2.0 - 1.0;
   uv.x *= width / height;
 
-  var o = vec3f(0.0, 0.0, 2.0);
-  var d = normalize(vec3f(uv, -1.0));
-
-  d = rotateZ(d, rotZ);
-  d = rotateX(d, rotX);
-  d = rotateY(d, rotY);
-
-  o = rotateX(o, rotX);
-  o = rotateY(o, rotY);
-
+  var o = vec4f(uniforms.cameraToWorld[3]).xyz;
+  var d = (uniforms.cameraToWorld * normalize(vec4f(uv, -1.0, 0.0))).xyz;
+ 
   var col = renderBackground(o, d);
 
   let t = trace(o, d, 0.0025, 24.0, 64u);
 
   if(t < INFINITY) {
-    col = vec3f(1.0, 0.0, 0.0);
+    col = vec3f(1.0, 1.0, 0.0);
   }
 
   textureStore(outputTexture, vec2u(globalId.x, globalId.y), vec4f(col, 1.0));
