@@ -245,8 +245,8 @@ async function prepareContentResources() {
   contentTextureView = contentTexture.createView();
 
   contentUniformBuffer = device.createBuffer(
-      // 4x4 modelview, canvas, time, programmable value
-      {size: 20 * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
+      // 4x4 modelview, canvas w/h, time, programmable value
+      {size: (16 + 2 + 1 + 1) * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
 
   const contentBindGroupLayout = device.createBindGroupLayout({
     entries: [
@@ -300,7 +300,8 @@ function render(time) {
 
   writeBufferData(
       contentUniformBuffer, new Float32Array([
-        ...viewMatrix, CANVAS_WIDTH, CANVAS_HEIGHT,
+        ...viewMatrix,
+        CANVAS_WIDTH, CANVAS_HEIGHT,
         AUDIO ? audioContext.currentTime : ((time - start) / 1000.0),
         programmableValue
       ]));

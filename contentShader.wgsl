@@ -5,6 +5,7 @@ struct Uniforms {
   value: f32
 }
 
+const EPSILON = 0.01;
 const INFINITY = 999999.0;
 
 @group(0) @binding(0) var outputTexture: texture_storage_2d<rgba8unorm, write>;
@@ -32,18 +33,6 @@ fn maxComponent(v: vec3f) -> f32 {
   return max(max(v.x, v.y), v.z);
 }
 
-// https://gist.github.com/munrocket/236ed5ba7e409b8bdf1ff6eca5dcdc39
-fn rand2d(n: vec2f) -> f32 {
-  return fract(sin(dot(n, vec2f(12.9898, 4.1414))) * 43758.5453);
-}
-
-fn noise2d(n: vec2f) -> f32 {
-  let d = vec2f(0, 1);
-  let b = floor(n);
-  let f = smoothstep(vec2f(0), vec2f(1), fract(n));
-  return mix(mix(rand2d(b), rand2d(b + d.yx), f.x), mix(rand2d(b + d.xy), rand2d(b + d.yy), f.x), f.y);
-}
-
 fn fSphere(p: vec3f, c: vec3f, r: f32) -> f32 {
   return length(p - c) - r;
 }
@@ -54,8 +43,9 @@ fn fBox(p: vec3f, b: vec3f) -> f32 {
 }
 
 fn f(p: vec3f) -> f32 {
-  let d = fSphere(p, vec3f(), 1.25 - uniforms.value);
-  return min(d, -fBox(p, vec3f(1)));
+  //let d = fSphere(p, vec3f(), 1.25 - uniforms.value);
+  //return max(d, fBox(p, vec3f(1)));
+  return fSphere(p, vec3f(), 1.0 - uniforms.value);
 }
 
 fn trace(o: vec3f, d: vec3f, pixelRadius: f32, tmax: f32, maxIterations: u32) -> f32 {
@@ -116,6 +106,14 @@ fn trace(o: vec3f, d: vec3f, pixelRadius: f32, tmax: f32, maxIterations: u32) ->
   return candidateT;
 }
 
+fn calcNormal(p: vec3f) -> vec3f {
+  let d = f(p);
+  let dx = f(p + vec3f(EPSILON, 0, 0)) - d;
+  let dy = f(p + vec3f(0, EPSILON, 0)) - d;
+  let dz = f(p + vec3f(0, 0, EPSILON)) - d;
+  return normalize(vec3f(dx, dy, dz));
+}
+
 fn renderBackground(o: vec3f, d: vec3f) -> vec3f {
   return vec3f();
 }
@@ -140,14 +138,17 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   uv.x *= width / height;
 
   var o = vec4f(uniforms.cameraToWorld[3]).xyz;
-  var d = (uniforms.cameraToWorld * normalize(vec4f(uv, -1.0, 0.0))).xyz;
+  var d = (uniforms.cameraToWorld * normalize(vec4f(uv, -1.0 / tan(30.0 * 3.14159 / 180.0) / (width / height), 0.0))).xyz;
  
   var col = renderBackground(o, d);
 
   let t = trace(o, d, 0.0025, 24.0, 64u);
 
+  let normal = calcNormal(o + t * d);
+
   if(t < INFINITY) {
-    col = vec3f(1.0, 1.0, 0.0);
+    col = normal;
+    //col = vec3f(1);
   }
 
   textureStore(outputTexture, vec2u(globalId.x, globalId.y), vec4f(col, 1.0));
