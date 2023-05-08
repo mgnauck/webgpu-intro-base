@@ -44,9 +44,9 @@ fn fBox(p: vec3f, b: vec3f) -> f32 {
 }
 
 fn f(p: vec3f) -> f32 {
-  //let d = fSphere(p, vec3f(), 1.25 - uniforms.value);
-  //return max(d, fBox(p, vec3f(1)));
-  return fSphere(p, vec3f(), 1.0 - uniforms.value);
+  let d = fSphere(p, vec3f(), 1.25 - uniforms.value);
+  return max(d, fBox(p, vec3f(1)));
+  //return fSphere(p, vec3f(), 1.0 - uniforms.value);
 }
 
 fn trace(o: vec3f, d: vec3f, pixelRadius: f32, tmax: f32, maxIterations: u32) -> f32 {
@@ -131,13 +131,13 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
 
   let time = uniforms.time;
 
-  let verticalFovInDeg = 30.0;
+  let verticalFovInDeg = 60.0;
 
   let fragCoord = vec2f(f32(globalId.x), f32(globalId.y));
   let uv = (fragCoord - uniforms.resolution * 0.5) / height;
 
   let o = vec4f(uniforms.cameraToWorld[3]).xyz;
-  let d = (uniforms.cameraToWorld * normalize(vec4f(uv, -0.5 / tan(radians(verticalFovInDeg)), 0.0))).xyz;
+  let d = (uniforms.cameraToWorld * normalize(vec4f(uv, -0.5 / tan(radians(verticalFovInDeg / 2.0)), 0.0))).xyz;
  
   var col = renderBackground(o, d);
 
