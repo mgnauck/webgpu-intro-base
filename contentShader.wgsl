@@ -5,6 +5,7 @@ struct Uniforms {
   value: f32
 }
 
+const PI = 3.14159;
 const EPSILON = 0.01;
 const INFINITY = 999999.0;
 
@@ -130,26 +131,39 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
 
   let time = uniforms.time;
 
-  var uv = vec2f(
-    f32(globalId.x) / width,
-    f32(globalId.y) / height);
+  let verticalFovInDeg = 30.0;
 
-  uv = uv * 2.0 - 1.0;
-  uv.x *= width / height;
+  let fragCoord = vec2f(f32(globalId.x), f32(globalId.y));
+  let uv = (fragCoord - uniforms.resolution * 0.5) / height;
 
-  var o = vec4f(uniforms.cameraToWorld[3]).xyz;
-  var d = (uniforms.cameraToWorld * normalize(vec4f(uv, -1.0 / tan(30.0 * 3.14159 / 180.0) / (width / height), 0.0))).xyz;
+  let o = vec4f(uniforms.cameraToWorld[3]).xyz;
+  let d = (uniforms.cameraToWorld * normalize(vec4f(uv, -0.5 / tan(radians(verticalFovInDeg)), 0.0))).xyz;
  
   var col = renderBackground(o, d);
 
   let t = trace(o, d, 0.0025, 24.0, 64u);
 
-  let normal = calcNormal(o + t * d);
+  let hitPos = o + t * d;
+  let normal = calcNormal(hitPos);
 
   if(t < INFINITY) {
     col = normal;
-    //col = vec3f(1);
   }
+
+  /*
+  // Frag depth
+  let zNear = 0.1; 
+  let zFar = 100.0;
+  let proj1 = zFar / (zNear - zFar);
+  let proj2 = (zFar * zNear) / (zNear - zFar);
+  let eyeFwd = (uniforms.cameraToWorld * vec4f(0, 0, -1, 0)).xyz;
+  let camSpaceDepth = -t * dot(d, eyeFwd);
+  let ndcFragDepth = -proj1 - proj2 / camSpaceDepth;
+  col = vec3f(ndcFragDepth);
+  */
+
+  // Gamma
+  col = pow(col, vec3f(0.4545));
 
   textureStore(outputTexture, vec2u(globalId.x, globalId.y), vec4f(col, 1.0));
 }
