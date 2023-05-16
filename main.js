@@ -396,6 +396,7 @@ function handleMouseMoveEvent(e) {
 
 function handleMouseWheelEvent(e) {
   programmableValue -= e.deltaY * WHEEL_VELOCITY;
+  console.log("value:" + programmableValue);
 }
 
 function startRender() {

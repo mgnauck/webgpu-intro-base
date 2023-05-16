@@ -5,9 +5,29 @@ struct Uniforms {
   value: f32
 }
 
+struct Light {
+  position: vec3f,
+  color: vec3f
+}
+
+struct Material {
+  ambient: vec3f,
+  diffuse: vec3f,
+  specular: vec3f,
+  exponent: f32
+}
+
+const MAX_LIGHT_COUNT = 2;
 const PI = 3.14159;
 const EPSILON = 0.01;
 const INFINITY = 999999.0;
+
+const lights = array<Light, MAX_LIGHT_COUNT>(
+  Light(vec3f(10, 10, 10), vec3f(0.7, 0.85, 1.0)),
+  Light(vec3f(-10, -10, 10), vec3f(1.0, 0.85, 0.7))
+  );
+
+const sphereMaterial = Material(vec3f(0.001), vec3f(0.6, 0.01, 0.01), vec3f(0.8), 128.0);
 
 @group(0) @binding(0) var outputTexture: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
@@ -30,23 +50,31 @@ fn rotateZ(v: vec3f, a: f32) -> vec3f {
   return vec3f(v.x * c - v.y * s, v.y * c + v.x * s, v.z);
 }
 
-fn maxComponent(v: vec3f) -> f32 {
-  return max(max(v.x, v.y), v.z);
-}
-
-fn fSphere(p: vec3f, c: vec3f, r: f32) -> f32 {
-  return length(p - c) - r;
-}
-
-fn fBox(p: vec3f, b: vec3f) -> f32 {
-  let q = abs(p) - b;
-  return length(max(q, vec3f(0))) + min(maxComponent(q), 0);
+fn fSphere(p: vec3f, r: f32) -> f32 {
+  return length(p) - r;
 }
 
 fn f(p: vec3f) -> f32 {
-  let d = fSphere(p, vec3f(), 1.25 - uniforms.value);
-  return max(d, fBox(p, vec3f(1)));
-  //return fSphere(p, vec3f(), 1.0 - uniforms.value);
+  return fSphere(p, 0.5);
+}
+
+fn traceSimple(o: vec3f, d: vec3f, tmax: f32, maxIterations: u32) -> f32 {
+	var t = 0.0;
+  var fSign = 1.0;
+  if(f(o) < 0.0) {
+    fSign = -1.0;
+  }
+	for(var i=0u; i<maxIterations; i++) {
+		let dist = fSign * f(o + t * d);
+		if(abs(dist) < 0.001) {
+			return t;
+		}
+		t += dist;
+		if(t >= tmax) {
+			return INFINITY;
+		}
+	}
+	return INFINITY;
 }
 
 fn trace(o: vec3f, d: vec3f, pixelRadius: f32, tmax: f32, maxIterations: u32) -> f32 {
@@ -115,6 +143,26 @@ fn calcNormal(p: vec3f) -> vec3f {
   return normalize(vec3f(dx, dy, dz));
 }
 
+fn calcLightContribution(m: Material, eyePos: vec3f, eyeDir: vec3f, n: vec3f) -> vec3f {
+  var col = m.ambient;
+  for(var i=0u; i<MAX_LIGHT_COUNT; i++) {
+    let light = lights[i];
+    
+    let lv = normalize(light.position - eyePos);
+    let diffuseFactor = max(dot(n, lv), 0.0); 
+    
+    let rv = reflect(lv, n);
+    let reflectedLightAngle = dot(rv, eyeDir);
+    var specularFactor = 0.0;
+    if(diffuseFactor > 0.0 && reflectedLightAngle > 0.0) {
+      specularFactor = pow(reflectedLightAngle, m.exponent);
+    }
+    
+    col += (diffuseFactor * m.diffuse + specularFactor * m.specular) * light.color;
+  }
+  return col;
+}
+
 fn renderBackground(o: vec3f, d: vec3f) -> vec3f {
   return vec3f();
 }
@@ -131,38 +179,43 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
 
   let time = uniforms.time;
 
+  // TODO provide proj and tan(fov) as uniforms
+
+  let zNear = 0.1;
+  let zFar = 100.0;
   let verticalFovInDeg = 60.0;
+
+  // wgpu clip space z is from 0 to 1
+  let proj1 = zFar / (zFar - zNear);
+  let proj2 = zFar * zNear / (zFar - zNear);
 
   let fragCoord = vec2f(f32(globalId.x), f32(globalId.y));
   let uv = (fragCoord - uniforms.resolution * 0.5) / height;
 
-  let o = vec4f(uniforms.cameraToWorld[3]).xyz;
-  let d = (uniforms.cameraToWorld * normalize(vec4f(uv, -0.5 / tan(radians(verticalFovInDeg / 2.0)), 0.0))).xyz;
+  let dirEyeSpace = normalize(vec3f(uv, -0.5 / tan(radians(0.5 * verticalFovInDeg))));
+  let dir = (uniforms.cameraToWorld * vec4f(dirEyeSpace, 0.0)).xyz;
+  let origin = vec4f(uniforms.cameraToWorld[3]).xyz;
  
-  var col = renderBackground(o, d);
+  var col = renderBackground(origin, dir);
 
-  let t = trace(o, d, 0.0025, 24.0, 64u);
+  var t = trace(origin, dir, 0.001, zFar, 96u);
+  //var t = traceSimple(origin, dir, zFar, 64u);
 
-  let hitPos = o + t * d;
-  let normal = calcNormal(hitPos);
-
-  if(t < INFINITY) {
-    col = normal;
+  var fSign = 1.0;
+  if(f(origin) < 0.0) {
+    fSign = -1.0;
   }
 
-  /*
-  // Frag depth
-  let zNear = 0.1; 
-  let zFar = 100.0;
-  let proj1 = zFar / (zNear - zFar);
-  let proj2 = (zFar * zNear) / (zNear - zFar);
-  let eyeFwd = (uniforms.cameraToWorld * vec4f(0, 0, -1, 0)).xyz;
-  let camSpaceDepth = -t * dot(d, eyeFwd);
-  let ndcFragDepth = -proj1 - proj2 / camSpaceDepth;
-  col = vec3f(ndcFragDepth);
-  */
+  var hitPos = origin + t * dir;
+  let normal = fSign * calcNormal(hitPos);
 
-  // Gamma
+  if(t < INFINITY) {
+    col = calcLightContribution(sphereMaterial, hitPos, dir, normal);
+  }
+
+  //let fragDepth = proj1 + proj2 / (t * dirEyeSpace).z;
+  //col = vec3f(ndcFragDepth);
+
   col = pow(col, vec3f(0.4545));
 
   textureStore(outputTexture, vec2u(globalId.x, globalId.y), vec4f(col, 1.0));
