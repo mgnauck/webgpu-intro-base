@@ -17,17 +17,17 @@ struct Material {
   exponent: f32
 }
 
-const MAX_LIGHT_COUNT = 2;
+const MAX_LIGHT_COUNT = 1;
 const PI = 3.14159;
-const EPSILON = 0.01;
+const EPSILON = 0.001;
 const INFINITY = 999999.0;
 
 const lights = array<Light, MAX_LIGHT_COUNT>(
-  Light(vec3f(10, 10, 10), vec3f(0.7, 0.85, 1.0)),
-  Light(vec3f(-10, -10, 10), vec3f(1.0, 0.85, 0.7))
+  Light(vec3f(10, 2, 10), vec3f(0.7, 0.85, 1.0)),
+  //Light(vec3f(-10, -10, 10), vec3f(1.0, 0.85, 0.7))
   );
 
-const sphereMaterial = Material(vec3f(0.001), vec3f(0.6, 0.01, 0.01), vec3f(0.8), 128.0);
+const sphereMaterial = Material(vec3f(0.005), vec3f(0.01, 0.6, 0.3), vec3f(0.8), 28.0);
 
 @group(0) @binding(0) var outputTexture: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
@@ -50,12 +50,20 @@ fn rotateZ(v: vec3f, a: f32) -> vec3f {
   return vec3f(v.x * c - v.y * s, v.y * c + v.x * s, v.z);
 }
 
+fn fBox(p: vec3f, e: vec3f, r: f32) -> f32 {
+  return length(max(abs(p) - e, vec3f(0))) - r;
+}
+
 fn fSphere(p: vec3f, r: f32) -> f32 {
   return length(p) - r;
 }
 
 fn f(p: vec3f) -> f32 {
-  return fSphere(p, 0.5);
+  let dbox = fBox(p + vec3f(0.0, 0.0, 0.0), vec3f(3.0, 0.1, 3.0), 0.01);
+  let dsph = fSphere(p + vec3f(0.0, -1.0 + sin(uniforms.time) * 0.5, 0.0), 1.0 + uniforms.value);
+  return min(dbox, dsph);
+  //return fBox(p, vec3f(0.5), 0.1);
+  //return fSphere(p, 0.5);
 }
 
 fn traceSimple(o: vec3f, d: vec3f, tmax: f32, maxIterations: u32) -> f32 {
@@ -143,13 +151,26 @@ fn calcNormal(p: vec3f) -> vec3f {
   return normalize(vec3f(dx, dy, dz));
 }
 
+fn calcOcclusion(p: vec3f, n: vec3f) -> f32 {
+  //let nAdj = normalize(n + vec3f(0, 0.5, 0));
+  let samCnt = 5.0;
+  let weight = 1.0;
+  var sum = 0.0;
+  for(var i=1.0; i<samCnt; i+=1.0) {
+    let dist = i / samCnt;
+    sum += (dist - f(p + n * dist)) / pow(2.0, i - 1.0);
+  }
+  return clamp(1.0 - weight * sum, 0.0, 1.0);
+}
+
 fn calcLightContribution(m: Material, eyePos: vec3f, eyeDir: vec3f, n: vec3f) -> vec3f {
   var col = m.ambient;
+  let occlusion = calcOcclusion(eyePos, n);
   for(var i=0u; i<MAX_LIGHT_COUNT; i++) {
     let light = lights[i];
     
     let lv = normalize(light.position - eyePos);
-    let diffuseFactor = max(dot(n, lv), 0.0); 
+    let diffuseFactor = max(dot(n, lv), 0.0) * occlusion; 
     
     let rv = reflect(lv, n);
     let reflectedLightAngle = dot(rv, eyeDir);
@@ -198,9 +219,9 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
  
   var col = renderBackground(origin, dir);
 
-  var t = trace(origin, dir, 0.001, zFar, 96u);
+  var t = trace(origin, dir, 0.01, zFar, 96u);
   //var t = traceSimple(origin, dir, zFar, 64u);
-
+ 
   var fSign = 1.0;
   if(f(origin) < 0.0) {
     fSign = -1.0;

@@ -58,6 +58,7 @@ let device;
 
 let contentTextureView;
 let contentUniformBuffer;
+let contentBindGroupLayout;
 let contentBindGroup;
 let contentPipeline;
 
@@ -248,7 +249,7 @@ async function prepareContentResources() {
       // 4x4 modelview, canvas w/h, time, programmable value
       {size: (16 + 2 + 1 + 1) * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
 
-  const contentBindGroupLayout = device.createBindGroupLayout({
+  contentBindGroupLayout = device.createBindGroupLayout({
     entries: [
       {
         binding: 0,
@@ -271,6 +272,10 @@ async function prepareContentResources() {
     ]
   });
 
+  await setupContentPipeline();
+}
+
+async function setupContentPipeline() {
   contentPipeline = await createComputePipeline(
       await loadTextFile("contentShader.wgsl"), contentBindGroupLayout);
 }
@@ -438,6 +443,9 @@ function startRender() {
   }
 
   requestAnimationFrame(render);
+
+  // Periodically reload content shader
+  setInterval(setupContentPipeline, 500);
 }
 
 async function main() {
