@@ -3,53 +3,19 @@ import {mat4, utils, vec3} from "https://wgpu-matrix.org/dist/0.x/wgpu-matrix.mo
 const FULLSCREEN = false;
 const AUDIO = false;
 
-const ASPECT = 1.6;
-const CANVAS_WIDTH = 800;
+const ASPECT = 1.0; // 1.6
+const CANVAS_WIDTH = 180; // 800
 const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 
 const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
 
+const GRID_RES = 32;
+const CELL_SIZE = 1.0;
+
 const MOVE_VELOCITY = 0.1;
 const LOOK_VELOCITY = 0.025;
 const WHEEL_VELOCITY = 0.0025;
-
-const BLIT_SHADER = `
-struct Output {
-  @builtin(position) position: vec4f,
-  @location(0) texCoord: vec2f
-}
-
-@vertex
-fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> Output {
-
-  let pos = array<vec2f, 4>(
-    vec2f(-1, 1), vec2f(-1, -1), vec2f(1, 1), vec2f(1, -1));
-
-  var output: Output;
-
-  let h = vec2f(0.5, 0.5);
-
-  output.position = vec4f(pos[vertexIndex], 0, 1);
-  output.texCoord = pos[vertexIndex] * h + h;
-
-  return output;
-}
-
-@group(0) @binding(0) var inputTexture: texture_2d<f32>;
-
-@fragment
-fn fragmentMain(@location(0) texCoord: vec2f) -> @location(0) vec4f {
-  return textureLoad(
-    inputTexture, 
-    vec2u(texCoord * vec2f(${CANVAS_WIDTH}, ${CANVAS_HEIGHT})),
-    0);
-}
-`;
-
-// External for now
-const AUDIO_SHADER = ``;
-const CONTENT_SHADER = ``;
 
 let audioContext;
 let audioBufferSourceNode;
@@ -58,10 +24,12 @@ let device;
 
 let contentTextureView;
 let contentUniformBuffer;
+let contentCellBuffer;
 let contentBindGroupLayout;
 let contentBindGroup;
 let contentPipeline;
 
+let blitBindGroupLayout;
 let blitBindGroup;
 let blitPassDescriptor;
 let blitPipeline;
@@ -72,39 +40,17 @@ let context;
 let viewMatrix;
 let eye, dir;
 let programmableValue;
+let cells;
 
 let start;
 
-function loadTextFile(url) {
+function loadTextFile(url)
+{
   return fetch(url).then(response => response.text());
 }
 
-function setupCanvasAndContext() {
-  document.body.innerHTML = "<button>CLICK<canvas style='width:0;cursor:none'>";
-  canvas = document.querySelector("canvas");
-  canvas.width = CANVAS_WIDTH;
-  canvas.height = CANVAS_HEIGHT;
-
-  let presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-  if (presentationFormat !== "bgra8unorm") {
-    throw new Error(`Expected canvas pixel format of bgra8unorm but
-       was '${presentationFormat}'.`);
-  }
-
-  context = canvas.getContext("webgpu");
-
-  context.configure({device, format: presentationFormat, alphaMode: "opaque"});
-}
-
-function writeBufferData(buffer, data) {
-  const bufferData = new Float32Array(data);
-
-  device.queue.writeBuffer(
-      buffer, 0, bufferData.buffer, bufferData.byteOffset,
-      bufferData.byteLength);
-}
-
-async function createComputePipeline(shaderCode, bindGroupLayout) {
+async function createComputePipeline(shaderCode, bindGroupLayout)
+{
   return device.createComputePipelineAsync({
     layout: (bindGroupLayout === undefined) ?
         "auto" :
@@ -116,14 +62,14 @@ async function createComputePipeline(shaderCode, bindGroupLayout) {
   });
 }
 
-function encodeComputePassAndSubmit(
-    pipeline, bindGroup, workgroupCountX, workgroupCountY, preSubmitOperation) {
+function encodeComputePassAndSubmit(pipeline, bindGroup, workgroupCountX, workgroupCountY, workgroupCountZ, preSubmitOperation)
+{
   const commandEncoder = device.createCommandEncoder();
 
   const passEncoder = commandEncoder.beginComputePass();
   passEncoder.setPipeline(pipeline);
   passEncoder.setBindGroup(0, bindGroup);
-  passEncoder.dispatchWorkgroups(workgroupCountX, workgroupCountY);
+  passEncoder.dispatchWorkgroups(workgroupCountX, workgroupCountY, workgroupCountZ);
   passEncoder.end();
 
   if (preSubmitOperation != undefined) {
@@ -133,18 +79,8 @@ function encodeComputePassAndSubmit(
   device.queue.submit([commandEncoder.finish()]);
 }
 
-function createRenderPassDescriptor(view) {
-  return {
-    colorAttachments: [{
-      view,
-      clearValue: {r: 1.0, g: 0.0, b: 0.0, a: 1.0},
-      loadOp: "clear",
-      storeOp: "store"
-    }]
-  };
-}
-
-async function createRenderPipeline(shaderCode, bindGroupLayout) {
+async function createRenderPipeline(shaderCode, bindGroupLayout)
+{
   let shaderModule = device.createShaderModule({code: shaderCode});
   return device.createRenderPipelineAsync({
     layout: (bindGroupLayout === undefined) ?
@@ -160,9 +96,9 @@ async function createRenderPipeline(shaderCode, bindGroupLayout) {
   });
 }
 
-function encodeBlitPassAndSubmit(passDescriptor, pipeline, bindGroup) {
+function encodeBlitPassAndSubmit(passDescriptor, pipeline, bindGroup)
+{
   const commandEncoder = device.createCommandEncoder();
-
   const passEncoder = commandEncoder.beginRenderPass(passDescriptor);
   passEncoder.setPipeline(pipeline);
   passEncoder.setBindGroup(0, bindGroup);
@@ -172,7 +108,8 @@ function encodeBlitPassAndSubmit(passDescriptor, pipeline, bindGroup) {
   device.queue.submit([commandEncoder.finish()]);
 }
 
-async function renderAudio() {
+async function prepareAudio()
+{
   audioContext = new AudioContext();
 
   let audioBuffer = audioContext.createBuffer(
@@ -208,9 +145,8 @@ async function renderAudio() {
   setupPerformanceTimer("Render audio");
 
   encodeComputePassAndSubmit(
-      await createComputePipeline(
-          await loadTextFile("audioShader.wgsl"), audioBindGroupLayout),
-      audioBindGroup, Math.ceil(AUDIO_WIDTH / 8), Math.ceil(AUDIO_HEIGHT / 8),
+      await createComputePipeline(await loadTextFile("audioShader.wgsl"), audioBindGroupLayout),
+      audioBindGroup, Math.ceil(AUDIO_WIDTH / 8), Math.ceil(AUDIO_HEIGHT / 8), 1,
       function(commandEncoder) {
         commandEncoder.copyTextureToBuffer(
             {texture: audioTexture},
@@ -236,7 +172,8 @@ async function renderAudio() {
   audioBufferSourceNode.connect(audioContext.destination);
 }
 
-async function prepareContentResources() {
+async function createGPUResources()
+{
   let contentTexture = device.createTexture({
     format: "rgba8unorm",
     usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
@@ -246,8 +183,11 @@ async function prepareContentResources() {
   contentTextureView = contentTexture.createView();
 
   contentUniformBuffer = device.createBuffer(
-      // 4x4 modelview, canvas w/h, time, programmable value
-      {size: (16 + 2 + 1 + 1) * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
+      // 4x4 modelview, canvas w/h, grid res, cell size, time, 3x programmable value
+      {size: (16 + 2 + 1 + 1 + 1 + 3) * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
+
+  contentCellBuffer = device.createBuffer(
+    {size: GRID_RES * GRID_RES * GRID_RES * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   contentBindGroupLayout = device.createBindGroupLayout({
     entries: [
@@ -260,6 +200,11 @@ async function prepareContentResources() {
         binding: 1,
         visibility: GPUShaderStage.COMPUTE,
         buffer: {type: "uniform"}
+      },
+      {
+        binding: 2,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: {type: "read-only-storage"}
       }
     ]
   });
@@ -268,20 +213,14 @@ async function prepareContentResources() {
     layout: contentBindGroupLayout,
     entries: [
       {binding: 0, resource: contentTextureView},
-      {binding: 1, resource: {buffer: contentUniformBuffer}}
+      {binding: 1, resource: {buffer: contentUniformBuffer}},
+      {binding: 2, resource: {buffer: contentCellBuffer}}
     ]
   });
 
-  await setupContentPipeline();
-}
+  //contentPipeline = await createComputePipeline(CONTENT_SHADER, contentBindGroupLayout);
 
-async function setupContentPipeline() {
-  contentPipeline = await createComputePipeline(
-      await loadTextFile("contentShader.wgsl"), contentBindGroupLayout);
-}
-
-async function prepareBlitResources() {
-  let blitBindGroupLayout = device.createBindGroupLayout({
+  blitBindGroupLayout = device.createBindGroupLayout({
     entries: [
       {binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: {}},
     ]
@@ -294,63 +233,78 @@ async function prepareBlitResources() {
     ]
   });
 
-  blitPassDescriptor = createRenderPassDescriptor(undefined);
-  blitPipeline = await createRenderPipeline(BLIT_SHADER, blitBindGroupLayout);
+  blitPassDescriptor = {
+    colorAttachments: [{
+      undefined, // view
+      clearValue: {r: 1.0, g: 0.0, b: 0.0, a: 1.0},
+      loadOp: "clear",
+      storeOp: "store"
+    }]
+  };
+
+  //blitPipeline = await createRenderPipeline(BLIT_SHADER, blitBindGroupLayout);
 }
 
-function render(time) {
-  if (audioContext === undefined && start === undefined) {
-    start = time;
-  }
+async function createPipelines()
+{
+  let shader = await loadTextFile("contentShader.wgsl");
+  contentPipeline = await createComputePipeline(shader, contentBindGroupLayout);
+  blitPipeline = await createRenderPipeline(shader, blitBindGroupLayout);
+}
 
-  writeBufferData(
-      contentUniformBuffer, new Float32Array([
-        ...viewMatrix,
-        CANVAS_WIDTH, CANVAS_HEIGHT,
-        AUDIO ? audioContext.currentTime : ((time - start) / 1000.0),
-        programmableValue
-      ]));
+function render(time)
+{
+  if (audioContext === undefined && start === undefined)
+    start = time;
+
+    device.queue.writeBuffer(contentUniformBuffer, 0, new Float32Array([
+      ...viewMatrix,
+      CANVAS_WIDTH, CANVAS_HEIGHT,
+      GRID_RES, CELL_SIZE,
+      AUDIO ? audioContext.currentTime : ((time - start) / 1000.0),
+      programmableValue, 1.0, 1.0
+    ]));
+
+  device.queue.writeBuffer(contentCellBuffer, 0, cells);
 
   setupPerformanceTimer("Render");
 
-  encodeComputePassAndSubmit(
-      contentPipeline, contentBindGroup, Math.ceil(CANVAS_WIDTH / 8),
-      Math.ceil(CANVAS_HEIGHT / 8));
+  encodeComputePassAndSubmit(contentPipeline, contentBindGroup, Math.ceil(CANVAS_WIDTH / 8), Math.ceil(CANVAS_HEIGHT / 8), 1);
 
-  blitPassDescriptor.colorAttachments[0].view =
-      context.getCurrentTexture().createView();
+  blitPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
   encodeBlitPassAndSubmit(blitPassDescriptor, blitPipeline, blitBindGroup);
 
   requestAnimationFrame(render);
 }
 
-function setupPerformanceTimer(timerName) {
+function setupPerformanceTimer(timerName)
+{
   let begin = performance.now();
 
   device.queue.onSubmittedWorkDone()
-      .then(function() {
-        let end = performance.now();
-        let frameTime = end - begin;
-        document.title =
-            `${(frameTime).toFixed(2)} / ${(1000.0 / frameTime).toFixed(2)}`;
-        // console.log(`${timerName} (ms): ${(end - begin).toFixed(2)}`);
-      })
-      .catch(function(err) {
-        console.log(err);
-      });
+    .then(function() {
+      let end = performance.now();
+      let frameTime = end - begin;
+      document.title = `${(frameTime).toFixed(2)} / ${(1000.0 / frameTime).toFixed(2)}`;
+    }).catch(function(err) {
+      console.log(err);
+    });
 }
 
-function resetView() {
+function resetView()
+{
   eye = vec3.create(0, 0, 1);
   dir = vec3.create(0, 0, -1);
   programmableValue = 0.0;
 }
 
-function computeViewMatrix() {
+function computeViewMatrix()
+{
   viewMatrix = mat4.lookAt(eye, vec3.add(eye, dir), vec3.create(0, 1, 0));
 }
 
-function handleKeyEvent(e) {
+function handleKeyEvent(e)
+{
   switch (e.key) {
     case "a":
       vec3.add(
@@ -374,7 +328,8 @@ function handleKeyEvent(e) {
   computeViewMatrix();
 }
 
-function handleMouseMoveEvent(e) {
+function handleMouseMoveEvent(e)
+{
   let yaw = -e.movementX * LOOK_VELOCITY;  // negation?
   let pitch = -e.movementY * LOOK_VELOCITY;
 
@@ -399,12 +354,14 @@ function handleMouseMoveEvent(e) {
   computeViewMatrix();
 }
 
-function handleMouseWheelEvent(e) {
+function handleMouseWheelEvent(e)
+{
   programmableValue -= e.deltaY * WHEEL_VELOCITY;
   console.log("value:" + programmableValue);
 }
 
-function startRender() {
+function startRender()
+{
   if (FULLSCREEN) {
     canvas.requestFullscreen();
   } else {
@@ -417,6 +374,10 @@ function startRender() {
 
   resetView();
   computeViewMatrix();
+
+  cells = new Uint32Array(GRID_RES * GRID_RES * GRID_RES);
+  for(let i=0; i<cells.length; i+=5)
+    cells[i] = 1;
 
   document.querySelector("button").removeEventListener("click", startRender);
 
@@ -444,11 +405,12 @@ function startRender() {
 
   requestAnimationFrame(render);
 
-  // Periodically reload content shader
-  setInterval(setupContentPipeline, 500);
+  // Reload shader
+  setInterval(createPipelines, 500);
 }
 
-async function main() {
+async function main()
+{
   if (!navigator.gpu) {
     throw new Error("WebGPU is not supported on this browser.");
   }
@@ -464,13 +426,23 @@ async function main() {
   }
 
   if (AUDIO) {
-    await renderAudio();
+    await prepareAudio();
   }
 
-  await prepareContentResources();
-  await prepareBlitResources();
+  await createGPUResources();
+  await createPipelines();
 
-  setupCanvasAndContext();
+  document.body.innerHTML = "<button>CLICK<canvas style='width:0;cursor:none'>";
+  canvas = document.querySelector("canvas");
+  canvas.width = CANVAS_WIDTH;
+  canvas.height = CANVAS_HEIGHT;
+
+  let presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+  if (presentationFormat !== "bgra8unorm")
+    throw new Error(`Expected canvas pixel format of bgra8unorm but was '${presentationFormat}'.`);
+
+  context = canvas.getContext("webgpu");
+  context.configure({device, format: presentationFormat, alphaMode: "opaque"});
 
   if (AUDIO) {
     document.querySelector("button").addEventListener("click", startRender);
