@@ -10,8 +10,7 @@ const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
 
-const GRID_RES = 32;
-const CELL_SIZE = 1.0;
+const VOXEL_GRID_RES = 32;
 
 const MOVE_VELOCITY = 0.1;
 const LOOK_VELOCITY = 0.025;
@@ -24,7 +23,7 @@ let device;
 
 let contentTextureView;
 let contentUniformBuffer;
-let contentCellBuffer;
+let contentVoxelGridBuffer;
 let contentBindGroupLayout;
 let contentBindGroup;
 let contentPipeline;
@@ -40,7 +39,7 @@ let context;
 let viewMatrix;
 let eye, dir;
 let programmableValue;
-let cells;
+let voxelGrid;
 
 let start;
 
@@ -183,11 +182,11 @@ async function createGPUResources()
   contentTextureView = contentTexture.createView();
 
   contentUniformBuffer = device.createBuffer(
-      // 4x4 modelview, canvas w/h, grid res, cell size, time, 3x programmable value
-      {size: (16 + 2 + 1 + 1 + 1 + 3) * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
+      // 4x4 modelview, grid res, time, 2x programmable value
+      {size: (16 + 1 + 1 + 2) * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
 
-  contentCellBuffer = device.createBuffer(
-    {size: GRID_RES * GRID_RES * GRID_RES * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
+  contentVoxelGridBuffer = device.createBuffer(
+    {size: VOXEL_GRID_RES * VOXEL_GRID_RES * VOXEL_GRID_RES * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   contentBindGroupLayout = device.createBindGroupLayout({
     entries: [
@@ -214,7 +213,7 @@ async function createGPUResources()
     entries: [
       {binding: 0, resource: contentTextureView},
       {binding: 1, resource: {buffer: contentUniformBuffer}},
-      {binding: 2, resource: {buffer: contentCellBuffer}}
+      {binding: 2, resource: {buffer: contentVoxelGridBuffer}}
     ]
   });
 
@@ -259,13 +258,12 @@ function render(time)
 
     device.queue.writeBuffer(contentUniformBuffer, 0, new Float32Array([
       ...viewMatrix,
-      CANVAS_WIDTH, CANVAS_HEIGHT,
-      GRID_RES, CELL_SIZE,
+      VOXEL_GRID_RES,
       AUDIO ? audioContext.currentTime : ((time - start) / 1000.0),
-      programmableValue, 1.0, 1.0
+      programmableValue, 1.0
     ]));
 
-  device.queue.writeBuffer(contentCellBuffer, 0, cells);
+  device.queue.writeBuffer(contentVoxelGridBuffer, 0, voxelGrid);
 
   setupPerformanceTimer("Render");
 
@@ -375,9 +373,9 @@ function startRender()
   resetView();
   computeViewMatrix();
 
-  cells = new Uint32Array(GRID_RES * GRID_RES * GRID_RES);
-  for(let i=0; i<cells.length; i+=5)
-    cells[i] = 1;
+  voxelGrid = new Uint32Array(VOXEL_GRID_RES * VOXEL_GRID_RES * VOXEL_GRID_RES);
+  for(let i=0; i<voxelGrid.length; i++)
+    voxelGrid[i] = Math.random() > 0.5 ? 1 : 0;
 
   document.querySelector("button").removeEventListener("click", startRender);
 
