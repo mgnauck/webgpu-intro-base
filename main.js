@@ -3,14 +3,14 @@ import {mat4, utils, vec3} from "https://wgpu-matrix.org/dist/0.x/wgpu-matrix.mo
 const FULLSCREEN = false;
 const AUDIO = false;
 
-const ASPECT = 1.0; // 1.6
-const CANVAS_WIDTH = 180; // 800
+const ASPECT = 1.6;
+const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 
 const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
 
-const VOXEL_GRID_RES = 32;
+const VOXEL_GRID_RES = 4.0;
 
 const MOVE_VELOCITY = 0.1;
 const LOOK_VELOCITY = 0.025;
