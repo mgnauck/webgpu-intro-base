@@ -3,7 +3,7 @@
 struct Uniforms
 {
   cameraToWorld: mat4x4f,
-  voxelGridRes: f32,
+  gridRes: f32,
   time: f32,
   freeValue: vec2f,
 }
@@ -11,37 +11,34 @@ struct Uniforms
 const WIDTH = 800;
 const HEIGHT = 500;
 
-fn minComp(v: vec3f) -> f32
+fn traverseGrid(pos: vec3f, dir: vec3f, gridRes: f32) -> vec3f
 {
-  return min(v.x, min(v.y, v.z));
-}
-
-fn maxComp(v: vec3f) -> f32
-{
-  return max(v.x, max(v.y, v.z));
-}
-
-fn aabbIntersect(ext: vec3f, ori: vec3f, dir: vec3f, t: ptr<function, f32>) -> bool
-{
-  let invDir = 1.0 / dir;
-  let tv0 = (-ext - ori) * invDir;
-  let tv1 = (ext - ori) * invDir;
-  let tvmin = min(tv0, tv1);
-  let tvmax = max(tv0, tv1);
-
-  //return maxComp(tmin) <= minComp(tmax);
+  let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes);
+  let stepDir = sign(dir);
+  var currCell = floor(pos);  
+  var delta = abs(1.0 / dir);
+  var t = (max(vec3f(0), stepDir) - stepDir * fract(pos)) * delta;
   
-  let t0 = maxComp(tvmin);
-  let t1 = minComp(tvmax);
+  loop {
+    let cellInc = vec3f(f32(t.x <= t.y && t.x <= t.z), f32(t.y <= t.x && t.y <= t.z), f32(t.z <= t.x && t.z <= t.y));
+    
+    t += cellInc * delta;
+    currCell += cellInc * stepDir;
+ 
+    let cellBound = dot(cellInc, currCell);
+    if(cellBound < 0.0 || cellBound >= gridRes) {
+      return vec3f(0.0);
+    }
 
-  *t = mix(t1, t0, max(0.0, sign(t0)));
-
-  return *t > 0.0 && t0 <= t1;
+    if(grid[i32(dot(currCell, gridOfs))] > 0) { 
+      return vec3f(cellInc);
+    }
+  }
 }
 
 @group(0) @binding(0) var outputTexture: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
-@group(0) @binding(2) var<storage> voxelGrid : array<u32>; 
+@group(0) @binding(2) var<storage> grid : array<u32>; 
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) globalId: vec3u)
@@ -60,14 +57,8 @@ fn main(@builtin(global_invocation_id) globalId: vec3u)
   let dir = (uniforms.cameraToWorld * vec4f(dirEyeSpace, 0.0)).xyz;
   let origin = vec4f(uniforms.cameraToWorld[3]).xyz;
 
-  var size = uniforms.voxelGridRes + uniforms.freeValue.x;
-  var t : f32;
-  var col = vec3f(0);
-  if(aabbIntersect(vec3f(size * 0.5), origin, dir, &t)) {
-    let p = origin + t * dir;
-    col = vec3f(vec3f(0.5) + p / size);
-  }
-  
+  var col = traverseGrid(origin, dir, uniforms.gridRes);
+
   col = pow(col, vec3f(0.4545));
 
   textureStore(outputTexture, vec2u(globalId.x, globalId.y), vec4f(col, 1.0));

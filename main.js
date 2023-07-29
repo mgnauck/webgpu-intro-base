@@ -10,7 +10,7 @@ const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
 
-const VOXEL_GRID_RES = 4.0;
+const GRID_RES = 64.0;
 
 const MOVE_VELOCITY = 0.1;
 const LOOK_VELOCITY = 0.025;
@@ -186,7 +186,7 @@ async function createGPUResources()
       {size: (16 + 1 + 1 + 2) * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
 
   contentVoxelGridBuffer = device.createBuffer(
-    {size: VOXEL_GRID_RES * VOXEL_GRID_RES * VOXEL_GRID_RES * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
+    {size: GRID_RES * GRID_RES * GRID_RES * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   contentBindGroupLayout = device.createBindGroupLayout({
     entries: [
@@ -258,7 +258,7 @@ function render(time)
 
     device.queue.writeBuffer(contentUniformBuffer, 0, new Float32Array([
       ...viewMatrix,
-      VOXEL_GRID_RES,
+      GRID_RES,
       AUDIO ? audioContext.currentTime : ((time - start) / 1000.0),
       programmableValue, 1.0
     ]));
@@ -291,7 +291,7 @@ function setupPerformanceTimer(timerName)
 
 function resetView()
 {
-  eye = vec3.create(0, 0, 1);
+  eye = vec3.create(0, 0, 8);
   dir = vec3.create(0, 0, -1);
   programmableValue = 0.0;
 }
@@ -373,9 +373,9 @@ function startRender()
   resetView();
   computeViewMatrix();
 
-  voxelGrid = new Uint32Array(VOXEL_GRID_RES * VOXEL_GRID_RES * VOXEL_GRID_RES);
+  voxelGrid = new Uint32Array(GRID_RES * GRID_RES * GRID_RES);
   for(let i=0; i<voxelGrid.length; i++)
-    voxelGrid[i] = Math.random() > 0.5 ? 1 : 0;
+    voxelGrid[i] = Math.random() > 0.99 ? 1 : 0;
 
   document.querySelector("button").removeEventListener("click", startRender);
 
