@@ -11,6 +11,16 @@ struct Uniforms
 const WIDTH = 800;
 const HEIGHT = 500;
 
+fn maxComp(v: vec3f) -> f32
+{
+  return max(v.x, max(v.y, v.z));
+}
+
+fn minComp(v: vec3f) -> f32
+{
+  return min(v.x, min(v.y, v.z));
+}
+
 fn traverseGrid(pos: vec3f, dir: vec3f, gridRes: f32) -> vec3f
 {
   let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes);
@@ -36,6 +46,30 @@ fn traverseGrid(pos: vec3f, dir: vec3f, gridRes: f32) -> vec3f
   }
 }
 
+fn planeMarch(pos: vec3f, dir: vec3f, gridRes: f32) -> vec3f
+{
+  let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes);
+  var t = 0.0;
+
+  while(t < 128.0) {
+    let p = pos + t * dir;
+    let cell = floor(p);
+
+    if(minComp(cell) < 0.0 || maxComp(cell) > gridRes) {
+      break;
+    }
+    
+    if(grid[i32(dot(cell, gridOfs))] > 0) {
+      return vec3f(1.0 - t / gridRes);
+    }
+    
+    let delta = (step(vec3f(0), dir) - fract(p)) / dir;
+    t += max(minComp(delta), 0.001);
+  }
+
+  return vec3f(0);
+}
+
 @group(0) @binding(0) var outputTexture: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
 @group(0) @binding(2) var<storage> grid : array<u32>; 
@@ -57,7 +91,8 @@ fn main(@builtin(global_invocation_id) globalId: vec3u)
   let dir = (uniforms.cameraToWorld * vec4f(dirEyeSpace, 0.0)).xyz;
   let origin = vec4f(uniforms.cameraToWorld[3]).xyz;
 
-  var col = traverseGrid(origin, dir, uniforms.gridRes);
+  //var col = traverseGrid(origin, dir, uniforms.gridRes);
+  var col = planeMarch(origin, dir, uniforms.gridRes);
 
   col = pow(col, vec3f(0.4545));
 
