@@ -21,33 +21,38 @@ fn minComp(v: vec3f) -> f32
   return min(v.x, min(v.y, v.z));
 }
 
-fn traverseGrid(pos: vec3f, dir: vec3f, gridRes: f32) -> vec3f
+// TODO Check how f32 vs. i32 performs
+
+fn traverseGrid(pos: vec3f, dir: vec3f, gridRes: f32, dist: ptr<function, f32>) -> bool
 {
   let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes);
   let stepDir = sign(dir);
   var currCell = floor(pos);  
   var delta = abs(1.0 / dir);
-  var t = (max(vec3f(0), stepDir) - stepDir * fract(pos)) * delta;
-  
+  var t = (step(vec3f(0), stepDir) - stepDir * fract(pos)) * delta;
+
+  *dist = 0.0;
+
   loop {
+    if(minComp(currCell) < 0.0 || maxComp(currCell) >= gridRes) {
+      return false;
+    }
+
+    if(grid[i32(dot(currCell, gridOfs))] > 0) { 
+      return true;
+    }
+
     let cellInc = vec3f(f32(t.x <= t.y && t.x <= t.z), f32(t.y <= t.x && t.y <= t.z), f32(t.z <= t.x && t.z <= t.y));
     
     t += cellInc * delta;
     currCell += cellInc * stepDir;
- 
-    let cellBound = dot(cellInc, currCell);
-    if(cellBound < 0.0 || cellBound >= gridRes) {
-      return vec3f(0.0);
-    }
-
-    if(grid[i32(dot(currCell, gridOfs))] > 0) { 
-      return vec3f(cellInc);
-    }
+    *dist = dot(cellInc, t);
   }
 }
 
-fn planeMarch(pos: vec3f, dir: vec3f, gridRes: f32) -> vec3f
+fn planeMarch(pos: vec3f, dir: vec3f, gridRes: f32, dist: ptr<function, f32>) -> bool
 {
+  let invDir = 1.0 / dir;
   let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes);
   var t = 0.0;
 
@@ -55,19 +60,16 @@ fn planeMarch(pos: vec3f, dir: vec3f, gridRes: f32) -> vec3f
     let p = pos + t * dir;
     let cell = floor(p);
 
-    if(minComp(cell) < 0.0 || maxComp(cell) > gridRes) {
-      break;
+    if(minComp(cell) >= 0.0 && maxComp(cell) < gridRes && grid[i32(dot(cell, gridOfs))] > 0) {
+      *dist = t;
+      return true;
     }
     
-    if(grid[i32(dot(cell, gridOfs))] > 0) {
-      return vec3f(1.0 - t / gridRes);
-    }
-    
-    let delta = (step(vec3f(0), dir) - fract(p)) / dir;
+    let delta = (step(vec3f(0), dir) - fract(p)) * invDir;
     t += max(minComp(delta), 0.001);
   }
 
-  return vec3f(0);
+  return false;
 }
 
 @group(0) @binding(0) var outputTexture: texture_storage_2d<rgba8unorm, write>;
@@ -91,8 +93,12 @@ fn main(@builtin(global_invocation_id) globalId: vec3u)
   let dir = (uniforms.cameraToWorld * vec4f(dirEyeSpace, 0.0)).xyz;
   let origin = vec4f(uniforms.cameraToWorld[3]).xyz;
 
-  //var col = traverseGrid(origin, dir, uniforms.gridRes);
-  var col = planeMarch(origin, dir, uniforms.gridRes);
+  var col: vec3f;
+  var t: f32;
+  if(traverseGrid(origin, dir, uniforms.gridRes, &t)) {
+  //if(planeMarch(origin, dir, uniforms.gridRes, &t)) {
+    col = vec3f(1.0 - t / uniforms.gridRes);
+  }
 
   col = pow(col, vec3f(0.4545));
 
