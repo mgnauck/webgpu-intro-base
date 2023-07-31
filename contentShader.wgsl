@@ -21,32 +21,64 @@ fn minComp(v: vec3f) -> f32
   return min(v.x, min(v.y, v.z));
 }
 
-// TODO Check how f32 vs. i32 performs
+// TODO
+// AABB entry
+// Check traversal correlation
+// Minimum threshold for projected area
+
+fn traverseGridFixed(pos: vec3f, dir: vec3f, gridRes: i32, dist: ptr<function, f32>) -> bool
+{
+  let gridOfs = vec3i(1, gridRes, gridRes * gridRes);
+  let stepDir = vec3i(sign(dir));
+  var currCell = vec3i(floor(pos));
+  var delta = abs(1.0 / dir);
+  var t = (step(vec3f(0), vec3f(stepDir)) - vec3f(stepDir) * fract(pos)) * delta;
+
+  *dist = 0.0;
+
+  loop {
+    if(grid[dot(currCell, gridOfs)] > 0) { 
+      return true;
+    }
+
+    let stepMask = vec3i(i32(t.x <= t.y && t.x <= t.z), i32(t.y <= t.x && t.y <= t.z), i32(t.z <= t.x && t.z <= t.y)); 
+    t += vec3f(stepMask) * delta;
+    currCell += stepMask * stepDir;
+
+    let bound = dot(stepMask, currCell);
+    if(bound < 0 || bound >= gridRes) {
+      return false;
+    }
+
+    *dist = dot(vec3f(stepMask), t);
+  }
+}
 
 fn traverseGrid(pos: vec3f, dir: vec3f, gridRes: f32, dist: ptr<function, f32>) -> bool
 {
   let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes);
   let stepDir = sign(dir);
-  var currCell = floor(pos);  
+  var currCell = floor(pos);
   var delta = abs(1.0 / dir);
   var t = (step(vec3f(0), stepDir) - stepDir * fract(pos)) * delta;
 
   *dist = 0.0;
 
   loop {
-    if(minComp(currCell) < 0.0 || maxComp(currCell) >= gridRes) {
-      return false;
-    }
-
     if(grid[i32(dot(currCell, gridOfs))] > 0) { 
       return true;
     }
 
-    let cellInc = vec3f(f32(t.x <= t.y && t.x <= t.z), f32(t.y <= t.x && t.y <= t.z), f32(t.z <= t.x && t.z <= t.y));
-    
-    t += cellInc * delta;
-    currCell += cellInc * stepDir;
-    *dist = dot(cellInc, t);
+    let stepMask = vec3f(f32(t.x <= t.y && t.x <= t.z), f32(t.y <= t.x && t.y <= t.z), f32(t.z <= t.x && t.z <= t.y)); 
+    t += stepMask * delta;
+    currCell += stepMask * stepDir;
+
+    let bound = dot(stepMask, currCell);
+    if(bound < 0.0 || bound >= gridRes) {
+      return false;
+    }
+
+    *dist = dot(stepMask, t);
   }
 }
 
@@ -56,20 +88,26 @@ fn planeMarch(pos: vec3f, dir: vec3f, gridRes: f32, dist: ptr<function, f32>) ->
   let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes);
   var t = 0.0;
 
-  while(t < 128.0) {
+  loop {
     let p = pos + t * dir;
     let cell = floor(p);
 
-    if(minComp(cell) >= 0.0 && maxComp(cell) < gridRes && grid[i32(dot(cell, gridOfs))] > 0) {
+    if(minComp(cell) < 0.0 || maxComp(cell) >= gridRes) {
+      return false;
+    }
+
+    if(grid[i32(dot(cell, gridOfs))] > 0) {
       *dist = t;
       return true;
     }
     
     let delta = (step(vec3f(0), dir) - fract(p)) * invDir;
     t += max(minComp(delta), 0.001);
-  }
 
-  return false;
+    if(t > gridRes) {
+      return false;
+    }
+  }
 }
 
 @group(0) @binding(0) var outputTexture: texture_storage_2d<rgba8unorm, write>;
@@ -95,7 +133,8 @@ fn main(@builtin(global_invocation_id) globalId: vec3u)
 
   var col: vec3f;
   var t: f32;
-  if(traverseGrid(origin, dir, uniforms.gridRes, &t)) {
+  if(traverseGridFixed(origin, dir, i32(uniforms.gridRes), &t)) {
+  //if(traverseGrid(origin, dir, uniforms.gridRes, &t)) {
   //if(planeMarch(origin, dir, uniforms.gridRes, &t)) {
     col = vec3f(1.0 - t / uniforms.gridRes);
   }
