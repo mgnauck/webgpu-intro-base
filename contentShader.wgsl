@@ -10,6 +10,7 @@ struct Uniforms
 
 const WIDTH = 800;
 const HEIGHT = 500;
+const EPSILON = 0.001;
 
 fn maxComp(v: vec3f) -> f32
 {
@@ -21,40 +22,25 @@ fn minComp(v: vec3f) -> f32
   return min(v.x, min(v.y, v.z));
 }
 
-// TODO
-// AABB entry
-// Check traversal correlation
-// Minimum threshold for projected area
-
-fn traverseGridFixed(pos: vec3f, dir: vec3f, gridRes: i32, dist: ptr<function, f32>) -> bool
+fn insideAabb(minExt: vec3f, maxExt: vec3f, p: vec3f) -> bool
 {
-  let gridOfs = vec3i(1, gridRes, gridRes * gridRes);
-  let stepDir = vec3i(sign(dir));
-  var currCell = vec3i(floor(pos));
-  var delta = abs(1.0 / dir);
-  var t = (step(vec3f(0), vec3f(stepDir)) - vec3f(stepDir) * fract(pos)) * delta;
-
-  *dist = 0.0;
-
-  loop {
-    if(grid[dot(currCell, gridOfs)] > 0) { 
-      return true;
-    }
-
-    let stepMask = vec3i(i32(t.x <= t.y && t.x <= t.z), i32(t.y <= t.x && t.y <= t.z), i32(t.z <= t.x && t.z <= t.y)); 
-    t += vec3f(stepMask) * delta;
-    currCell += stepMask * stepDir;
-
-    let bound = dot(stepMask, currCell);
-    if(bound < 0 || bound >= gridRes) {
-      return false;
-    }
-
-    *dist = dot(vec3f(stepMask), t);
-  }
+  return p.x >= minExt.x && p.y >= minExt.y && p.z >= minExt.z && p.x < maxExt.x && p.y < maxExt.y && p.z < maxExt.z;
 }
 
-fn traverseGrid(pos: vec3f, dir: vec3f, gridRes: f32, dist: ptr<function, f32>) -> bool
+fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, dir: vec3f, tmin: ptr<function, f32>, tmax: ptr<function, f32>) -> bool
+{
+  let invDir = 1.0 / dir;
+ 
+  let t0 = (minExt - ori) * invDir;
+  let t1 = (maxExt - ori) * invDir;
+  
+  *tmin = maxComp(min(t0, t1));
+  *tmax = minComp(max(t0, t1));
+
+  return *tmin <= *tmax && *tmax > 0.0;
+}
+
+fn traverseGrid(pos: vec3f, dir: vec3f, tmax: f32, gridRes: f32, dist: ptr<function, f32>) -> bool
 {
   let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes);
   let stepDir = sign(dir);
@@ -69,20 +55,24 @@ fn traverseGrid(pos: vec3f, dir: vec3f, gridRes: f32, dist: ptr<function, f32>) 
       return true;
     }
 
-    let stepMask = vec3f(f32(t.x <= t.y && t.x <= t.z), f32(t.y <= t.x && t.y <= t.z), f32(t.z <= t.x && t.z <= t.y)); 
-    t += stepMask * delta;
-    currCell += stepMask * stepDir;
+    let i = (u32(t.z <= t.x && t.z <= t.y) << 1) | u32(t.y <= t.x && t.y <= t.z);
 
-    let bound = dot(stepMask, currCell);
-    if(bound < 0.0 || bound >= gridRes) {
+    t[i] += delta[i];
+    currCell[i] += stepDir[i];
+
+    if(currCell[i] < 0.0 || currCell[i] >= gridRes) {
       return false;
     }
 
-    *dist = dot(stepMask, t);
+    *dist = t[i];
+
+    if(*dist > tmax) {
+      return false;
+    }
   }
 }
 
-fn planeMarch(pos: vec3f, dir: vec3f, gridRes: f32, dist: ptr<function, f32>) -> bool
+fn traverseGrid2(pos: vec3f, dir: vec3f, tmax: f32, gridRes: f32, dist: ptr<function, f32>) -> bool
 {
   let invDir = 1.0 / dir;
   let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes);
@@ -100,11 +90,11 @@ fn planeMarch(pos: vec3f, dir: vec3f, gridRes: f32, dist: ptr<function, f32>) ->
       *dist = t;
       return true;
     }
-    
-    let delta = (step(vec3f(0), dir) - fract(p)) * invDir;
-    t += max(minComp(delta), 0.001);
 
-    if(t > gridRes) {
+    let delta = (step(vec3f(0), invDir) - fract(p)) * invDir;
+    t += max(minComp(delta), EPSILON);
+
+    if(t > tmax) {
       return false;
     }
   }
@@ -131,12 +121,24 @@ fn main(@builtin(global_invocation_id) globalId: vec3u)
   let dir = (uniforms.cameraToWorld * vec4f(dirEyeSpace, 0.0)).xyz;
   let origin = vec4f(uniforms.cameraToWorld[3]).xyz;
 
-  var col: vec3f;
+  let s = uniforms.gridRes;
+  var col = vec3f(0);
+  var pos = origin;
+
+  var tmin: f32;
+  var tmax: f32;
+
+  if(!insideAabb(vec3(0), vec3f(s), origin) && intersectAabb(vec3(0), vec3f(s), origin, dir, &tmin, &tmax)) {
+    pos = origin + (tmin + EPSILON) * dir;
+  } else {
+    tmin = 0.0;
+    tmax = sqrt(s*s + s*s);
+  }
+ 
   var t: f32;
-  if(traverseGridFixed(origin, dir, i32(uniforms.gridRes), &t)) {
-  //if(traverseGrid(origin, dir, uniforms.gridRes, &t)) {
-  //if(planeMarch(origin, dir, uniforms.gridRes, &t)) {
-    col = vec3f(1.0 - t / uniforms.gridRes);
+  //if(traverseGrid(pos, dir, tmax, s, &t)) {
+  if(traverseGrid2(pos, dir, tmax, s, &t)) {
+    col = vec3f(1.0 - t / (tmax - tmin));
   }
 
   col = pow(col, vec3f(0.4545));
