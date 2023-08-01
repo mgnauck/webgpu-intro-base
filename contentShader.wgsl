@@ -45,7 +45,7 @@ fn traverseGrid(pos: vec3f, dir: vec3f, tmax: f32, gridRes: f32, dist: ptr<funct
   let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes);
   let stepDir = sign(dir);
   var currCell = floor(pos);
-  var delta = abs(1.0 / dir);
+  var delta = abs(length(dir) / dir);
   var t = (step(vec3f(0), stepDir) - stepDir * fract(pos)) * delta;
 
   *dist = 0.0;
@@ -72,29 +72,33 @@ fn traverseGrid(pos: vec3f, dir: vec3f, tmax: f32, gridRes: f32, dist: ptr<funct
   }
 }
 
-fn traverseGrid2(pos: vec3f, dir: vec3f, tmax: f32, gridRes: f32, dist: ptr<function, f32>) -> bool
+fn traverseGrid2(pos: vec3f, dir: vec3f, tmax: f32, gridRes: f32, t: ptr<function, f32>, col: ptr<function, vec3f>) -> bool
 {
   let invDir = 1.0 / dir;
+  let stepDir = step(vec3f(0), invDir);
   let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes);
-  var t = 0.0;
+ 
+  *t = 0.0;
 
   loop {
-    let p = pos + t * dir;
+    let p = pos + *t * dir;
     let cell = floor(p);
 
     if(minComp(cell) < 0.0 || maxComp(cell) >= gridRes) {
+      *col = vec3f(1.0, 0.0, 0.0);
       return false;
     }
 
     if(grid[i32(dot(cell, gridOfs))] > 0) {
-      *dist = t;
+      *col = vec3f(0.0, 1.0, 0.0);
       return true;
     }
 
-    let delta = (step(vec3f(0), invDir) - fract(p)) * invDir;
-    t += max(minComp(delta), EPSILON);
+    let delta = minComp((stepDir - fract(p)) * invDir);
+    *t += max(delta, EPSILON);
 
-    if(t > tmax) {
+    if(*t > tmax) {
+      *col = vec3f(0.0, 0.0, 1.0);
       return false;
     }
   }
@@ -127,20 +131,23 @@ fn main(@builtin(global_invocation_id) globalId: vec3u)
 
   var tmin: f32;
   var tmax: f32;
-
-  if(!insideAabb(vec3(0), vec3f(s), origin) && intersectAabb(vec3(0), vec3f(s), origin, dir, &tmin, &tmax)) {
-    pos = origin + (tmin + EPSILON) * dir;
-  } else {
-    tmin = 0.0;
-    tmax = sqrt(s*s + s*s);
-  }
- 
   var t: f32;
-  //if(traverseGrid(pos, dir, tmax, s, &t)) {
-  if(traverseGrid2(pos, dir, tmax, s, &t)) {
-    col = vec3f(1.0 - t / (tmax - tmin));
+  var hit: bool;
+
+  // TODO Extend all rays to start in aabb during intersection test + calc proper tmax
+
+  if(insideAabb(vec3(0), vec3f(s), origin)) {
+    tmax = sqrt(s*s + s*s);
+    hit = traverseGrid2(pos, dir, tmax, s, &t, &col);
+  } else if(intersectAabb(vec3(0), vec3f(s), origin, dir, &tmin, &tmax)) {
+      pos = origin + (tmin + EPSILON) * dir;
+      hit = traverseGrid2(pos, dir, tmax, s, &t, &col);  
   }
 
+  if(hit) {
+    col = col * vec3f(1.0 - t / (tmax - tmin));
+  }
+  
   col = pow(col, vec3f(0.4545));
 
   textureStore(outputTexture, vec2u(globalId.x, globalId.y), vec4f(col, 1.0));
