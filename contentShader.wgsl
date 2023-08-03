@@ -22,11 +22,6 @@ fn minComp(v: vec3f) -> f32
   return min(v.x, min(v.y, v.z));
 }
 
-fn insideAabb(minExt: vec3f, maxExt: vec3f, p: vec3f) -> bool
-{
-  return p.x >= minExt.x && p.y >= minExt.y && p.z >= minExt.z && p.x < maxExt.x && p.y < maxExt.y && p.z < maxExt.z;
-}
-
 fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, dir: vec3f, tmin: ptr<function, f32>, tmax: ptr<function, f32>) -> bool
 {
   let invDir = 1.0 / dir;
@@ -45,13 +40,13 @@ fn traverseGrid(pos: vec3f, dir: vec3f, tmax: f32, gridRes: f32, dist: ptr<funct
   let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes);
   let stepDir = sign(dir);
   var currCell = floor(pos);
-  var delta = abs(length(dir) / dir);
+  var delta = abs(1.0 / dir);
   var t = (step(vec3f(0), stepDir) - stepDir * fract(pos)) * delta;
 
   *dist = 0.0;
 
-  loop {
-    if(grid[i32(dot(currCell, gridOfs))] > 0) { 
+  while(*dist < tmax) {
+    if(grid[i32(dot(gridOfs, currCell))] > 0) { 
       return true;
     }
 
@@ -60,48 +55,33 @@ fn traverseGrid(pos: vec3f, dir: vec3f, tmax: f32, gridRes: f32, dist: ptr<funct
     t[i] += delta[i];
     currCell[i] += stepDir[i];
 
-    if(currCell[i] < 0.0 || currCell[i] >= gridRes) {
-      return false;
-    }
-
     *dist = t[i];
-
-    if(*dist > tmax) {
-      return false;
-    }
   }
+
+  return false;
 }
 
-fn traverseGrid2(pos: vec3f, dir: vec3f, tmax: f32, gridRes: f32, t: ptr<function, f32>, col: ptr<function, vec3f>) -> bool
+fn traverseGrid2(pos: vec3f, dir: vec3f, tmin: f32, tmax: f32, gridRes: f32, t: ptr<function, f32>) -> bool
 {
   let invDir = 1.0 / dir;
   let stepDir = step(vec3f(0), invDir);
   let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes);
- 
-  *t = 0.0;
 
-  loop {
+  *t = tmin;
+
+  while(*t < tmax) {
     let p = pos + *t * dir;
     let cell = floor(p);
 
-    if(minComp(cell) < 0.0 || maxComp(cell) >= gridRes) {
-      *col = vec3f(1.0, 0.0, 0.0);
-      return false;
-    }
-
-    if(grid[i32(dot(cell, gridOfs))] > 0) {
-      *col = vec3f(0.0, 1.0, 0.0);
+    if(grid[i32(dot(gridOfs, cell))] > 0) {
       return true;
     }
 
     let delta = minComp((stepDir - fract(p)) * invDir);
     *t += max(delta, EPSILON);
-
-    if(*t > tmax) {
-      *col = vec3f(0.0, 0.0, 1.0);
-      return false;
-    }
   }
+
+  return false;
 }
 
 @group(0) @binding(0) var outputTexture: texture_storage_2d<rgba8unorm, write>;
@@ -125,29 +105,18 @@ fn main(@builtin(global_invocation_id) globalId: vec3u)
   let dir = (uniforms.cameraToWorld * vec4f(dirEyeSpace, 0.0)).xyz;
   let origin = vec4f(uniforms.cameraToWorld[3]).xyz;
 
-  let s = uniforms.gridRes;
   var col = vec3f(0);
-  var pos = origin;
 
   var tmin: f32;
   var tmax: f32;
-  var t: f32;
-  var hit: bool;
-
-  // TODO Extend all rays to start in aabb during intersection test + calc proper tmax
-
-  if(insideAabb(vec3(0), vec3f(s), origin)) {
-    tmax = sqrt(s*s + s*s);
-    hit = traverseGrid2(pos, dir, tmax, s, &t, &col);
-  } else if(intersectAabb(vec3(0), vec3f(s), origin, dir, &tmin, &tmax)) {
-      pos = origin + (tmin + EPSILON) * dir;
-      hit = traverseGrid2(pos, dir, tmax, s, &t, &col);  
+  if(intersectAabb(vec3f(0), vec3f(uniforms.gridRes), origin, dir, &tmin, &tmax)) {
+    var t: f32;
+    if(traverseGrid2(origin, dir, max(tmin, 0.0) + EPSILON, tmax - EPSILON, uniforms.gridRes, &t)) { 
+    //if(traverseGrid(origin + (max(tmin, 0.0) + EPSILON) * dir, dir, tmax - EPSILON, uniforms.gridRes, &t)) {
+      col += vec3f(0.0, 0.0, 1.0);
+    }
   }
 
-  if(hit) {
-    col = col * vec3f(1.0 - t / (tmax - tmin));
-  }
-  
   col = pow(col, vec3f(0.4545));
 
   textureStore(outputTexture, vec2u(globalId.x, globalId.y), vec4f(col, 1.0));

@@ -291,7 +291,7 @@ function setupPerformanceTimer(timerName)
 
 function resetView()
 {
-  eye = vec3.create(0, 0, GRID_RES + 1.0);
+  eye = vec3.create(0, 0, GRID_RES + GRID_RES * 0.1);
   dir = vec3.create(0, 0, -1);
   programmableValue = 0.0;
 }
