@@ -22,10 +22,8 @@ fn minComp(v: vec3f) -> f32
   return min(v.x, min(v.y, v.z));
 }
 
-fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, dir: vec3f, tmin: ptr<function, f32>, tmax: ptr<function, f32>) -> bool
+fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, invDir: vec3f, tmin: ptr<function, f32>, tmax: ptr<function, f32>) -> bool
 {
-  let invDir = 1.0 / dir;
- 
   let t0 = (minExt - ori) * invDir;
   let t1 = (maxExt - ori) * invDir;
   
@@ -34,6 +32,38 @@ fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, dir: vec3f, tmin: ptr
 
   return *tmin <= *tmax && *tmax > 0.0;
 }
+
+fn traverseGrid3(ori: vec3f, dir: vec3f, tmax: f32, gridRes: f32, dist: ptr<function, f32>) -> bool
+{
+  let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes); 
+  var cell = floor(ori);
+  let stepDir = sign(dir);
+  let invDir = abs(1.0 / dir);
+  //var t = (cell - ori + vec3f(0.5) + stepDir * 0.5) * invDir;
+  var t = (step(vec3f(0), stepDir) - stepDir * fract(ori)) * invDir;
+
+  *dist = 0.0;
+
+  //while(*dist < tmax) {
+  for(var j=0u; j<256; j++) {
+     if(grid[u32(dot(gridOfs, cell))] > 0) { 
+      return true;
+    }
+
+    let i = (u32(t.z <= t.x && t.z <= t.y) << 1) | u32(t.y <= t.x && t.y <= t.z);
+    t[i] += /* stepDir * */ invDir[i];
+    cell[i] += stepDir[i];
+
+    //*dist =
+
+    let bound = cell[i];
+    if(bound < 0.0 || bound >= gridRes) {
+      return false;
+    }
+  }
+
+  return false;
+} 
 
 fn traverseGrid(pos: vec3f, dir: vec3f, tmax: f32, gridRes: f32, dist: ptr<function, f32>) -> bool
 {
@@ -109,11 +139,11 @@ fn main(@builtin(global_invocation_id) globalId: vec3u)
 
   var tmin: f32;
   var tmax: f32;
-  if(intersectAabb(vec3f(0), vec3f(uniforms.gridRes), origin, dir, &tmin, &tmax)) {
+  if(intersectAabb(vec3f(0), vec3f(uniforms.gridRes), origin, 1.0 / dir, &tmin, &tmax)) {
     var t: f32;
     if(traverseGrid2(origin, dir, max(tmin, 0.0) + EPSILON, tmax - EPSILON, uniforms.gridRes, &t)) { 
-    //if(traverseGrid(origin + (max(tmin, 0.0) + EPSILON) * dir, dir, tmax - EPSILON, uniforms.gridRes, &t)) {
-      col += vec3f(0.0, 0.0, 1.0);
+    //if(traverseGrid3(origin + (max(tmin, 0.0) + EPSILON) * dir, dir, tmax - EPSILON, uniforms.gridRes, &t)) {
+      col += vec3f(1.0, 0.0, 1.0);
     }
   }
 
