@@ -33,51 +33,46 @@ fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, invDir: vec3f, tmin: 
   return *tmin <= *tmax && *tmax > 0.0;
 }
 
-fn traverseGrid(ori: vec3f, dir: vec3f, tmax: f32, gridRes: f32, dist: ptr<function, f32>) -> bool
+fn traverseGrid(ori: vec3f, dir: vec3f, tmax: f32, gridRes: f32, dist: ptr<function, f32>, norm: ptr<function, vec3f>) -> bool
 {
   let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes); 
   let invDir = 1.0 / dir;
   let stepDir = sign(dir);
   var cell = floor(ori);
   var t = (vec3f(0.5) + 0.5 * stepDir - fract(ori)) * invDir;
-  
+  var mask = vec3f(0);
+
   *dist = 0.0;
 
-  while(*dist < tmax) {
-     if(grid[u32(dot(gridOfs, cell))] > 0) { 
-      return true;
-    }
-
-    let mask = step(t.xyz, t.yzx) * step(t.xyz, t.zxy);
+  while(*dist < tmax) { 
+    mask = step(t.xyz, t.yzx) * step(t.xyz, t.zxy);
     t += mask * stepDir * invDir;
     cell += mask * stepDir;
 
-    *dist = maxComp((vec3f(0.5) - 0.5 * stepDir + cell - ori) * invDir);
-    
-    /*
-    let i = (u32(t.z <= t.x && t.z <= t.y) << 1) | u32(t.y <= t.x && t.y <= t.z);
-    t[i] += stepDir[i] * invDir[i];
-    cell[i] += stepDir[i];
+    if(grid[u32(dot(gridOfs, cell))] > 0) {
+      *norm = -mask * stepDir;
+      return true;
+    }
 
-    *dist = (0.5 - 0.5 * stepDir[i] + cell[i] - ori[i]) * invDir[i];
-    */
+    *dist = maxComp((vec3f(0.5) - 0.5 * stepDir + (cell - ori)) * invDir);
   }
 
   return false;
-} 
+}
 
-fn traverseGrid2(pos: vec3f, dir: vec3f, tmin: f32, tmax: f32, gridRes: f32, t: ptr<function, f32>) -> bool
+fn traverseGrid2(pos: vec3f, dir: vec3f, tmax: f32, gridRes: f32, t: ptr<function, f32>, norm: ptr<function, vec3f>) -> bool
 {
   let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes);
   let invDir = 1.0 / dir;
   let bound = step(vec3f(0), dir);
 
-  *t = tmin;
+  *t = 0.0;
 
   while(*t < tmax) {
     let p = pos + *t * dir;
 
     if(grid[i32(dot(gridOfs, floor(p)))] > 0) {
+      *norm = vec3f(1) - step(vec3f(EPSILON), vec3f(1) - fract(p));
       return true;
     }
 
@@ -110,20 +105,20 @@ fn main(@builtin(global_invocation_id) globalId: vec3u)
   let origin = vec4f(uniforms.cameraToWorld[3]).xyz;
 
   var col = vec3f(0);
-
   var tmin: f32;
   var tmax: f32;
   if(intersectAabb(vec3f(0), vec3f(uniforms.gridRes), origin, 1.0 / dir, &tmin, &tmax)) {
     var t: f32;
-    tmin = max(tmin, 0.0) + EPSILON;
-    if(traverseGrid2(origin, dir, max(tmin, 0.0) + EPSILON, tmax - EPSILON, uniforms.gridRes, &t)) {
-    //if(traverseGrid(origin + tmin * dir, dir, tmax - EPSILON - tmin, uniforms.gridRes, &t)) {
-      col += vec3f(1.0 - (t / tmax));
-      //col += vec3f(1.0 - (t / (tmax - EPSILON - tmin)));
+    var norm: vec3f;
+    tmin = max(tmin, EPSILON);
+    tmax = tmax - EPSILON - tmin;
+    let pos = origin + tmin * dir;
+    if(traverseGrid(pos, dir, tmax, uniforms.gridRes, &t, &norm)) {
+      col = norm;
     }
   }
 
-  col = pow(col, vec3f(0.4545));
+  //col = pow(col, vec3f(0.4545));
 
   textureStore(outputTexture, vec2u(globalId.x, globalId.y), vec4f(col, 1.0));
 }
