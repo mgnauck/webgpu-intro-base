@@ -33,81 +33,55 @@ fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, invDir: vec3f, tmin: 
   return *tmin <= *tmax && *tmax > 0.0;
 }
 
-fn traverseGrid3(ori: vec3f, dir: vec3f, tmax: f32, gridRes: f32, dist: ptr<function, f32>) -> bool
+fn traverseGrid(ori: vec3f, dir: vec3f, tmax: f32, gridRes: f32, dist: ptr<function, f32>) -> bool
 {
   let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes); 
-  var cell = floor(ori);
+  let invDir = 1.0 / dir;
   let stepDir = sign(dir);
-  let invDir = abs(1.0 / dir);
-  //var t = (cell - ori + vec3f(0.5) + stepDir * 0.5) * invDir;
-  var t = (step(vec3f(0), stepDir) - stepDir * fract(ori)) * invDir;
-
+  var cell = floor(ori);
+  var t = (vec3f(0.5) + 0.5 * stepDir - fract(ori)) * invDir;
+  
   *dist = 0.0;
 
-  //while(*dist < tmax) {
-  for(var j=0u; j<256; j++) {
+  while(*dist < tmax) {
      if(grid[u32(dot(gridOfs, cell))] > 0) { 
       return true;
     }
 
+    let mask = step(t.xyz, t.yzx) * step(t.xyz, t.zxy);
+    t += mask * stepDir * invDir;
+    cell += mask * stepDir;
+
+    *dist = maxComp((vec3f(0.5) - 0.5 * stepDir + cell - ori) * invDir);
+    
+    /*
     let i = (u32(t.z <= t.x && t.z <= t.y) << 1) | u32(t.y <= t.x && t.y <= t.z);
-    t[i] += /* stepDir * */ invDir[i];
+    t[i] += stepDir[i] * invDir[i];
     cell[i] += stepDir[i];
 
-    //*dist =
-
-    let bound = cell[i];
-    if(bound < 0.0 || bound >= gridRes) {
-      return false;
-    }
+    *dist = (0.5 - 0.5 * stepDir[i] + cell[i] - ori[i]) * invDir[i];
+    */
   }
 
   return false;
 } 
 
-fn traverseGrid(pos: vec3f, dir: vec3f, tmax: f32, gridRes: f32, dist: ptr<function, f32>) -> bool
-{
-  let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes);
-  let stepDir = sign(dir);
-  var currCell = floor(pos);
-  var delta = abs(1.0 / dir);
-  var t = (step(vec3f(0), stepDir) - stepDir * fract(pos)) * delta;
-
-  *dist = 0.0;
-
-  while(*dist < tmax) {
-    if(grid[i32(dot(gridOfs, currCell))] > 0) { 
-      return true;
-    }
-
-    let i = (u32(t.z <= t.x && t.z <= t.y) << 1) | u32(t.y <= t.x && t.y <= t.z);
-
-    t[i] += delta[i];
-    currCell[i] += stepDir[i];
-
-    *dist = t[i];
-  }
-
-  return false;
-}
-
 fn traverseGrid2(pos: vec3f, dir: vec3f, tmin: f32, tmax: f32, gridRes: f32, t: ptr<function, f32>) -> bool
 {
-  let invDir = 1.0 / dir;
-  let stepDir = step(vec3f(0), invDir);
   let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes);
+  let invDir = 1.0 / dir;
+  let bound = step(vec3f(0), dir);
 
   *t = tmin;
 
   while(*t < tmax) {
     let p = pos + *t * dir;
-    let cell = floor(p);
 
-    if(grid[i32(dot(gridOfs, cell))] > 0) {
+    if(grid[i32(dot(gridOfs, floor(p)))] > 0) {
       return true;
     }
 
-    let delta = minComp((stepDir - fract(p)) * invDir);
+    let delta = minComp((bound - fract(p)) * invDir);
     *t += max(delta, EPSILON);
   }
 
@@ -141,9 +115,11 @@ fn main(@builtin(global_invocation_id) globalId: vec3u)
   var tmax: f32;
   if(intersectAabb(vec3f(0), vec3f(uniforms.gridRes), origin, 1.0 / dir, &tmin, &tmax)) {
     var t: f32;
-    if(traverseGrid2(origin, dir, max(tmin, 0.0) + EPSILON, tmax - EPSILON, uniforms.gridRes, &t)) { 
-    //if(traverseGrid3(origin + (max(tmin, 0.0) + EPSILON) * dir, dir, tmax - EPSILON, uniforms.gridRes, &t)) {
-      col += vec3f(1.0, 0.0, 1.0);
+    tmin = max(tmin, 0.0) + EPSILON;
+    if(traverseGrid2(origin, dir, max(tmin, 0.0) + EPSILON, tmax - EPSILON, uniforms.gridRes, &t)) {
+    //if(traverseGrid(origin + tmin * dir, dir, tmax - EPSILON - tmin, uniforms.gridRes, &t)) {
+      col += vec3f(1.0 - (t / tmax));
+      //col += vec3f(1.0 - (t / (tmax - EPSILON - tmin)));
     }
   }
 
