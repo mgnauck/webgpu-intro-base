@@ -8,23 +8,10 @@ struct Uniforms
   freeValue: vec2f,
 }
 
-struct Light {
-  position: vec3f,
-  color: vec3f
-}
-
-struct Material {
-  ambient: vec3f,
-  diffuse: vec3f,
-  specular: vec3f,
-  exponent: f32
-}
-
 const WIDTH = 800;
 const HEIGHT = 500;
 const EPSILON = 0.001;
-
-const MAX_LIGHT_COUNT = 1;
+const HEMISPHERE = vec3f(0.3, 0.3, 0.6);
 
 @group(0) @binding(0) var outputTexture: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
@@ -75,35 +62,15 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, gridRes: f32, dist: ptr<fu
   return false;
 }
 
-fn calcLightContribution(eyePos: vec3f, eyeDir: vec3f, n: vec3f, m: Material, lights: array<Light, MAX_LIGHT_COUNT>) -> vec3f {
-  var col = m.ambient;
-  for(var i=0u; i<MAX_LIGHT_COUNT; i++) {
-    let light = lights[i];
-    
-    let lv = normalize(light.position - eyePos);
-    let diffuseFactor = max(dot(n, lv), 0.0);
-
-    let lv2 = light.position - eyePos;
-    let dist = dot(lv2, lv2);
-    let attenuation = 1.0 / (1.0 + 0.00006 * dist);
-   
-    //col += attenuation * diffuseFactor * m.diffuse * light.color;
-    
-    let rv = reflect(lv, n);
-    let reflectedLightAngle = dot(rv, eyeDir);
-    var specularFactor = 0.0;
-    if(diffuseFactor > 0.0 && reflectedLightAngle > 0.0) {
-      specularFactor = pow(reflectedLightAngle, m.exponent);
-    }
-    
-    col += attenuation * (diffuseFactor * m.diffuse + specularFactor * m.specular) * light.color;
-    
-  }
-  return col;
+fn calcLightContribution(pos: vec3f, dir: vec3f, norm: vec3f, dist: f32) -> vec3f
+{
+  var sky = (0.4 + norm.y * 0.6);
+  return HEMISPHERE * sky * exp(4 * -dist);
 }
 
-fn renderBackground(o: vec3f, d: vec3f) -> vec3f {
-  return vec3f();
+fn renderBackground(o: vec3f, d: vec3f) -> vec3f
+{
+  return HEMISPHERE * 0.001;
 }
 
 @compute @workgroup_size(8, 8)
@@ -112,12 +79,6 @@ fn main(@builtin(global_invocation_id) globalId: vec3u)
   if (globalId.x >= WIDTH || globalId.y >= HEIGHT) {
     return;
   }
-
- var lights = array<Light, MAX_LIGHT_COUNT>(
-  Light(vec3f(uniforms.gridRes, 2.0 * uniforms.gridRes, uniforms.gridRes), vec3f(0.7, 0.85, 1.0)),
-  );
-
-  const defaultMaterial = Material(vec3f(0.005), vec3f(0.01, 0.6, 0.3), vec3f(0.3), 28.0);
 
   let time = uniforms.time; 
   let verticalFovInDeg = 60.0;
@@ -141,7 +102,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u)
     tmax = tmax - EPSILON - tmin;
     if(traverseGrid(origin + tmin * dir, invDir, tmax, uniforms.gridRes, &t, &norm)) {
       //col = abs(norm); // * (1.0 - t / tmax);
-      col = calcLightContribution(origin + t * dir, dir, norm, defaultMaterial, lights) * (1.0 - t / tmax);
+      col = calcLightContribution(origin + t * dir, dir, norm, t / tmax);
     }
   }
 

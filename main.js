@@ -10,7 +10,7 @@ const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
 
-const GRID_RES = 64.0;
+const GRID_RES = 128.0;
 
 const MOVE_VELOCITY = 0.5;
 const LOOK_VELOCITY = 0.025;
@@ -375,7 +375,7 @@ function startRender()
 
   voxelGrid = new Uint32Array(GRID_RES * GRID_RES * GRID_RES);
   for(let i=0; i<voxelGrid.length; i++)
-    voxelGrid[i] = Math.random() > 0.99 ? 1 : 0;
+    voxelGrid[i] = Math.random() > 0.92 ? 1 : 0;
 
   document.querySelector("button").removeEventListener("click", startRender);
 
