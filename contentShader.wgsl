@@ -64,6 +64,18 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, gridRes: f32, dist: ptr<fu
 
 fn calcLightContribution(pos: vec3f, dir: vec3f, norm: vec3f, dist: f32) -> vec3f
 {
+  let border = 0.075;
+  // TODO Optimize!
+  var wire = (vec3f(1) - abs(norm)) * fract(pos);
+  if((wire.x > 0.0 && wire.x < border) || wire.x > 1.0 - border) {
+    return vec3f(0.0, 0.0, 0.0);
+  }
+  if((wire.y > 0.0 && wire.y < border) || wire.y > 1.0 - border) {
+    return vec3f(0.0, 0.0, 0.0);
+  }
+  if((wire.z > 0.0 && wire.z < border) || wire.z > 1.0 - border) {
+    return vec3f(0.0, 0.0, 0.0);
+  }
   var sky = (0.4 + norm.y * 0.6);
   return HEMISPHERE * sky * exp(4 * -dist);
 }
@@ -99,10 +111,8 @@ fn main(@builtin(global_invocation_id) globalId: vec3u)
 
   if(intersectAabb(vec3f(0), vec3f(uniforms.gridRes), origin, invDir, &tmin, &tmax)) {
     tmin = max(tmin, 0.0) - EPSILON;
-    tmax = tmax - EPSILON - tmin;
-    if(traverseGrid(origin + tmin * dir, invDir, tmax, uniforms.gridRes, &t, &norm)) {
-      //col = abs(norm); // * (1.0 - t / tmax);
-      col = calcLightContribution(origin + t * dir, dir, norm, t / tmax);
+    if(traverseGrid(origin + tmin * dir, invDir, tmax - EPSILON - tmin, uniforms.gridRes, &t, &norm)) {
+      col = calcLightContribution(origin + (tmin + t) * dir, dir, norm, (tmin + t) / tmax);
     }
   }
 

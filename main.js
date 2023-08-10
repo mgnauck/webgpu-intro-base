@@ -375,7 +375,7 @@ function startRender()
 
   voxelGrid = new Uint32Array(GRID_RES * GRID_RES * GRID_RES);
   for(let i=0; i<voxelGrid.length; i++)
-    voxelGrid[i] = Math.random() > 0.92 ? 1 : 0;
+    voxelGrid[i] = Math.random() > 0.99 ? 1 : 0;
 
   document.querySelector("button").removeEventListener("click", startRender);
 
