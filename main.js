@@ -21,10 +21,10 @@ let audioBufferSourceNode;
 
 let device;
 
-let voxelGridBuffer;
+const gridBuffer = [];
 let renderUniformBuffer;
 let renderBindGroupLayout;
-let renderBindGroup;
+const renderBindGroup = [];
 let renderPipeline;
 let renderPassDescriptor;
 
@@ -34,7 +34,7 @@ let context;
 let viewMatrix;
 let eye, dir;
 let programmableValue;
-let voxelGrid;
+let index = 0;
 
 let start;
 
@@ -171,27 +171,29 @@ async function prepareAudio()
 
 async function createGPUResources()
 {
-  renderUniformBuffer = device.createBuffer(
-      // 4x4 modelview, grid res, time, 2x programmable value
-      {size: (16 + 1 + 1 + 2) * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
-
-  voxelGridBuffer = device.createBuffer(
-    {size: GRID_RES * GRID_RES * GRID_RES * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
-
   renderBindGroupLayout = device.createBindGroupLayout({
     entries: [
       {binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: {type: "uniform"}},
       {binding: 1, visibility: GPUShaderStage.FRAGMENT, buffer: {type: "read-only-storage"}}
     ]
-  });
+  }); 
+  
+  // 4x4 modelview, grid res, time, 2x programmable value
+  renderUniformBuffer = device.createBuffer({size: (16 + 1 + 1 + 2) * 4,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
 
-  renderBindGroup = device.createBindGroup({
-    layout: renderBindGroupLayout,
-    entries: [
-      {binding: 0, resource: {buffer: renderUniformBuffer}},
-      {binding: 1, resource: {buffer: voxelGridBuffer}}
-    ]
-  });
+  for(let i=0; i<2; i++) {
+    gridBuffer[i] = device.createBuffer({size: GRID_RES * GRID_RES * GRID_RES * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
+
+    renderBindGroup[i] = device.createBindGroup({
+      layout: renderBindGroupLayout,
+      entries: [
+        {binding: 0, resource: {buffer: renderUniformBuffer}},
+        {binding: 1, resource: {buffer: gridBuffer[i]}}
+      ]
+    });
+  }
 
   renderPassDescriptor = {
     colorAttachments: [{
@@ -214,19 +216,17 @@ function render(time)
   if (audioContext === undefined && start === undefined)
     start = time;
 
-    device.queue.writeBuffer(renderUniformBuffer, 0, new Float32Array([
+  device.queue.writeBuffer(renderUniformBuffer, 0, new Float32Array([
       ...viewMatrix,
       GRID_RES,
       AUDIO ? audioContext.currentTime : ((time - start) / 1000.0),
       programmableValue, 1.0
     ]));
 
-  device.queue.writeBuffer(voxelGridBuffer, 0, voxelGrid);
-
   setupPerformanceTimer("Render");
 
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
-  encodeRenderPassAndSubmit(renderPassDescriptor, renderPipeline, renderBindGroup);
+  encodeRenderPassAndSubmit(renderPassDescriptor, renderPipeline, renderBindGroup[index]);
 
   requestAnimationFrame(render);
 }
@@ -243,6 +243,11 @@ function setupPerformanceTimer(timerName)
     }).catch(function(err) {
       console.log(err);
     });
+}
+
+function switchGrid()
+{
+  index = (index + 1) % 2;
 }
 
 function resetView()
@@ -328,9 +333,13 @@ function startRender()
   resetView();
   computeViewMatrix();
 
-  voxelGrid = new Uint32Array(GRID_RES * GRID_RES * GRID_RES);
-  for(let i=0; i<voxelGrid.length; i++)
-    voxelGrid[i] = Math.random() > 0.99 ? 1 : 0;
+  let grid = new Uint32Array(GRID_RES * GRID_RES * GRID_RES);
+
+  for(let j=0; j<2; j++) {
+    for(let i=0; i<grid.length; i++)
+      grid[i] = Math.random() > (0.99 * 0.5 * (j + 1)) ? 1 : 0;
+    device.queue.writeBuffer(gridBuffer[j], 0, grid);
+  }
 
   document.querySelector("button").removeEventListener("click", startRender);
 
@@ -358,8 +367,8 @@ function startRender()
 
   requestAnimationFrame(render);
 
-  // Reload shader
-  setInterval(createPipelines, 500);
+  setInterval(switchGrid, 5000);
+  setInterval(createPipelines, 500); // Reload shader
 }
 
 async function main()
