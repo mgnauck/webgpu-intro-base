@@ -21,17 +21,12 @@ let audioBufferSourceNode;
 
 let device;
 
-let contentTextureView;
-let contentUniformBuffer;
-let contentVoxelGridBuffer;
-let contentBindGroupLayout;
-let contentBindGroup;
-let contentPipeline;
-
-let blitBindGroupLayout;
-let blitBindGroup;
-let blitPassDescriptor;
-let blitPipeline;
+let voxelGridBuffer;
+let renderUniformBuffer;
+let renderBindGroupLayout;
+let renderBindGroup;
+let renderPipeline;
+let renderPassDescriptor;
 
 let canvas;
 let context;
@@ -56,8 +51,28 @@ async function createComputePipeline(shaderCode, bindGroupLayout)
         device.createPipelineLayout({bindGroupLayouts: [bindGroupLayout]}),
     compute: {
       module: device.createShaderModule({code: shaderCode}),
-      entryPoint: "main"
+      entryPoint: "m"
     }
+  });
+}
+
+async function createRenderPipeline(shaderCode, bindGroupLayout)
+{
+  let shaderModule = device.createShaderModule({code: shaderCode});
+  return device.createRenderPipelineAsync({
+    layout: (bindGroupLayout === undefined) ?
+        "auto" :
+        device.createPipelineLayout({bindGroupLayouts: [bindGroupLayout]}),
+    vertex: {
+      module: shaderModule,
+      entryPoint: "mV"
+    },
+    fragment: {
+      module: shaderModule,
+      entryPoint: "mF",
+      targets: [{format: "bgra8unorm"}]
+    },
+    primitive: {topology: "triangle-strip"}
   });
 }
 
@@ -78,24 +93,7 @@ function encodeComputePassAndSubmit(pipeline, bindGroup, workgroupCountX, workgr
   device.queue.submit([commandEncoder.finish()]);
 }
 
-async function createRenderPipeline(shaderCode, bindGroupLayout)
-{
-  let shaderModule = device.createShaderModule({code: shaderCode});
-  return device.createRenderPipelineAsync({
-    layout: (bindGroupLayout === undefined) ?
-        "auto" :
-        device.createPipelineLayout({bindGroupLayouts: [bindGroupLayout]}),
-    vertex: {module: shaderModule, entryPoint: "vertexMain"},
-    fragment: {
-      module: shaderModule,
-      entryPoint: "fragmentMain",
-      targets: [{format: "bgra8unorm"}]
-    },
-    primitive: {topology: "triangle-strip"}
-  });
-}
-
-function encodeBlitPassAndSubmit(passDescriptor, pipeline, bindGroup)
+function encodeRenderPassAndSubmit(passDescriptor, pipeline, bindGroup)
 {
   const commandEncoder = device.createCommandEncoder();
   const passEncoder = commandEncoder.beginRenderPass(passDescriptor);
@@ -173,66 +171,29 @@ async function prepareAudio()
 
 async function createGPUResources()
 {
-  let contentTexture = device.createTexture({
-    format: "rgba8unorm",
-    usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
-    size: [CANVAS_WIDTH, CANVAS_HEIGHT]
-  });
-
-  contentTextureView = contentTexture.createView();
-
-  contentUniformBuffer = device.createBuffer(
+  renderUniformBuffer = device.createBuffer(
       // 4x4 modelview, grid res, time, 2x programmable value
       {size: (16 + 1 + 1 + 2) * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
 
-  contentVoxelGridBuffer = device.createBuffer(
+  voxelGridBuffer = device.createBuffer(
     {size: GRID_RES * GRID_RES * GRID_RES * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
-  contentBindGroupLayout = device.createBindGroupLayout({
+  renderBindGroupLayout = device.createBindGroupLayout({
     entries: [
-      {
-        binding: 0,
-        visibility: GPUShaderStage.COMPUTE,
-        storageTexture: {format: "rgba8unorm"}
-      },
-      {
-        binding: 1,
-        visibility: GPUShaderStage.COMPUTE,
-        buffer: {type: "uniform"}
-      },
-      {
-        binding: 2,
-        visibility: GPUShaderStage.COMPUTE,
-        buffer: {type: "read-only-storage"}
-      }
+      {binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: {type: "uniform"}},
+      {binding: 1, visibility: GPUShaderStage.FRAGMENT, buffer: {type: "read-only-storage"}}
     ]
   });
 
-  contentBindGroup = device.createBindGroup({
-    layout: contentBindGroupLayout,
+  renderBindGroup = device.createBindGroup({
+    layout: renderBindGroupLayout,
     entries: [
-      {binding: 0, resource: contentTextureView},
-      {binding: 1, resource: {buffer: contentUniformBuffer}},
-      {binding: 2, resource: {buffer: contentVoxelGridBuffer}}
+      {binding: 0, resource: {buffer: renderUniformBuffer}},
+      {binding: 1, resource: {buffer: voxelGridBuffer}}
     ]
   });
 
-  //contentPipeline = await createComputePipeline(CONTENT_SHADER, contentBindGroupLayout);
-
-  blitBindGroupLayout = device.createBindGroupLayout({
-    entries: [
-      {binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: {}},
-    ]
-  });
-
-  blitBindGroup = device.createBindGroup({
-    layout: blitBindGroupLayout,
-    entries: [
-      {binding: 0, resource: contentTextureView},
-    ]
-  });
-
-  blitPassDescriptor = {
+  renderPassDescriptor = {
     colorAttachments: [{
       undefined, // view
       clearValue: {r: 1.0, g: 0.0, b: 0.0, a: 1.0},
@@ -240,15 +201,12 @@ async function createGPUResources()
       storeOp: "store"
     }]
   };
-
-  //blitPipeline = await createRenderPipeline(BLIT_SHADER, blitBindGroupLayout);
 }
 
 async function createPipelines()
 {
   let shader = await loadTextFile("contentShader.wgsl");
-  contentPipeline = await createComputePipeline(shader, contentBindGroupLayout);
-  blitPipeline = await createRenderPipeline(shader, blitBindGroupLayout);
+  renderPipeline = await createRenderPipeline(shader, renderBindGroupLayout);
 }
 
 function render(time)
@@ -256,21 +214,19 @@ function render(time)
   if (audioContext === undefined && start === undefined)
     start = time;
 
-    device.queue.writeBuffer(contentUniformBuffer, 0, new Float32Array([
+    device.queue.writeBuffer(renderUniformBuffer, 0, new Float32Array([
       ...viewMatrix,
       GRID_RES,
       AUDIO ? audioContext.currentTime : ((time - start) / 1000.0),
       programmableValue, 1.0
     ]));
 
-  device.queue.writeBuffer(contentVoxelGridBuffer, 0, voxelGrid);
+  device.queue.writeBuffer(voxelGridBuffer, 0, voxelGrid);
 
   setupPerformanceTimer("Render");
 
-  encodeComputePassAndSubmit(contentPipeline, contentBindGroup, Math.ceil(CANVAS_WIDTH / 8), Math.ceil(CANVAS_HEIGHT / 8), 1);
-
-  blitPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
-  encodeBlitPassAndSubmit(blitPassDescriptor, blitPipeline, blitBindGroup);
+  renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
+  encodeRenderPassAndSubmit(renderPassDescriptor, renderPipeline, renderBindGroup);
 
   requestAnimationFrame(render);
 }
@@ -328,10 +284,9 @@ function handleKeyEvent(e)
 
 function handleMouseMoveEvent(e)
 {
-  let yaw = -e.movementX * LOOK_VELOCITY;  // negation?
-  let pitch = -e.movementY * LOOK_VELOCITY;
+  let yaw = -e.movementX * LOOK_VELOCITY;
+  let pitch = e.movementY * LOOK_VELOCITY;
 
-  // Disallow alignment of forward and global up vector
   const currentPitch = Math.acos(dir[1]);
   const newPitch = currentPitch - pitch;
   const minPitch = utils.degToRad(1.0);

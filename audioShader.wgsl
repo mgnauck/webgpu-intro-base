@@ -37,7 +37,7 @@ fn hiHat(time: f32) -> vec2f {
 @group(0) @binding(0) var outputTexture: texture_storage_2d<rg32float, write>;
 
 @compute @workgroup_size(8, 8)
-fn main(@builtin(global_invocation_id) globalId: vec3u) {
+fn m(@builtin(global_invocation_id) globalId: vec3u) {
   
   if (globalId.x >= 4096 || globalId.y >= 4096) {
     return;

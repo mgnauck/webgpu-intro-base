@@ -1,5 +1,3 @@
-// render voxel grid compute shader
-
 struct Uniforms
 {
   cameraToWorld: mat4x4f,
@@ -13,9 +11,8 @@ const HEIGHT = 500;
 const EPSILON = 0.001;
 const HEMISPHERE = vec3f(0.3, 0.3, 0.6);
 
-@group(0) @binding(0) var outputTexture: texture_storage_2d<rgba8unorm, write>;
-@group(0) @binding(1) var<uniform> uniforms: Uniforms;
-@group(0) @binding(2) var<storage> grid : array<u32>; 
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(0) @binding(1) var<storage> grid : array<u32>; 
 
 fn maxComp(v: vec3f) -> f32
 {
@@ -80,17 +77,20 @@ fn renderBackground(o: vec3f, d: vec3f) -> vec3f
   return HEMISPHERE * 0.001;
 }
 
-@compute @workgroup_size(8, 8)
-fn main(@builtin(global_invocation_id) globalId: vec3u)
+@vertex
+fn mV(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f
 {
-  if (globalId.x >= WIDTH || globalId.y >= HEIGHT) {
-    return;
-  }
+  let pos = array<vec2f, 4>(vec2f(-1, 1), vec2f(-1, -1), vec2f(1), vec2f(1, -1));
+  return vec4f(pos[vertexIndex], 0, 1);
+}
 
+@fragment
+fn mF(@builtin(position) position: vec4f) -> @location(0) vec4f
+{
   let time = uniforms.time; 
   let verticalFovInDeg = 60.0;
   
-  let fragCoord = vec2f(f32(globalId.x), f32(globalId.y));
+  let fragCoord = position.xy;
   let uv = (fragCoord - vec2f(WIDTH, HEIGHT) * 0.5) / f32(HEIGHT);
 
   let origin = vec4f(uniforms.cameraToWorld[3]).xyz;
@@ -111,40 +111,5 @@ fn main(@builtin(global_invocation_id) globalId: vec3u)
     }
   }
 
-  col = pow(col, vec3f(0.4545));
-
-  textureStore(outputTexture, vec2u(globalId.x, globalId.y), vec4f(col, 1.0));
-}
-
-// blit vertex and fragment shader
-
-struct Output {
-  @builtin(position) position: vec4f,
-  @location(0) texCoord: vec2f
-}
-
-@vertex
-fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> Output
-{
-  let pos = array<vec2f, 4>(
-    vec2f(-1, 1), vec2f(-1, -1), vec2f(1), vec2f(1, -1));
-
-  var output: Output;
-
-  let h = vec2f(0.5);
-
-  output.position = vec4f(pos[vertexIndex], 0, 1);
-  output.texCoord = pos[vertexIndex] * h + h;
-
-  return output;
-}
-
-@group(0) @binding(0) var inputTexture: texture_2d<f32>;
-
-@fragment
-fn fragmentMain(@location(0) texCoord: vec2f) -> @location(0) vec4f {
-  return textureLoad(
-    inputTexture, 
-    vec2u(texCoord * vec2f(WIDTH, HEIGHT)),
-    0);
+  return vec4f(pow(col, vec3f(0.4545)), 1.0);
 }
