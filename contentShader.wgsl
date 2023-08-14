@@ -1,3 +1,22 @@
+struct State {
+  minCell: vec4u,
+  maxCell: vec4u,
+}
+
+@group(0) @binding(0) var<storage, read_write> state : State; 
+@group(0) @binding(1) var<storage, read> inGrid : array<u32>; 
+@group(0) @binding(2) var<storage, read_write> outGrid : array<u32>; 
+
+@compute @workgroup_size(4,4,4)
+fn m(@builtin(global_invocation_id) globalId: vec3u)
+{
+  if(globalId.x >= state.maxCell.x || globalId.y >= state.maxCell.y || globalId.y >= state.maxCell.z) {
+    return;
+  }  
+}
+
+///////////
+
 struct Uniforms
 {
   cameraToWorld: mat4x4f,
@@ -78,14 +97,15 @@ fn renderBackground(o: vec3f, d: vec3f) -> vec3f
 }
 
 @vertex
-fn mV(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f
+fn v(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f
 {
+  // TODO Check why Y is flipped
   let pos = array<vec2f, 4>(vec2f(-1, 1), vec2f(-1, -1), vec2f(1), vec2f(1, -1));
   return vec4f(pos[vertexIndex], 0, 1);
 }
 
 @fragment
-fn mF(@builtin(position) position: vec4f) -> @location(0) vec4f
+fn f(@builtin(position) position: vec4f) -> @location(0) vec4f
 {
   let time = uniforms.time; 
   let verticalFovInDeg = 60.0;

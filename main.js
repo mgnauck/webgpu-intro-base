@@ -22,6 +22,12 @@ let audioBufferSourceNode;
 let device;
 
 const gridBuffer = [];
+
+let computeStorageBuffer;
+let computeBindGroupLayout;
+const computeBindGroup = [];
+let computePipeline;
+
 let renderUniformBuffer;
 let renderBindGroupLayout;
 const renderBindGroup = [];
@@ -36,7 +42,7 @@ let eye, dir;
 let programmableValue;
 let index = 0;
 
-let start;
+let start, lastUpdate;
 
 function loadTextFile(url)
 {
@@ -65,11 +71,11 @@ async function createRenderPipeline(shaderCode, bindGroupLayout)
         device.createPipelineLayout({bindGroupLayouts: [bindGroupLayout]}),
     vertex: {
       module: shaderModule,
-      entryPoint: "mV"
+      entryPoint: "v"
     },
     fragment: {
       module: shaderModule,
-      entryPoint: "mF",
+      entryPoint: "f",
       targets: [{format: "bgra8unorm"}]
     },
     primitive: {topology: "triangle-strip"}
@@ -171,6 +177,14 @@ async function prepareAudio()
 
 async function createGPUResources()
 {
+  computeBindGroupLayout = device.createBindGroupLayout({
+    entries: [ 
+      {binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: {type: "storage"}},
+      {binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: {type: "read-only-storage"}},
+      {binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: {type: "storage"}},
+    ]
+  });
+
   renderBindGroupLayout = device.createBindGroupLayout({
     entries: [
       {binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: {type: "uniform"}},
@@ -178,19 +192,37 @@ async function createGPUResources()
     ]
   }); 
   
+  // min + max cell index in xyz (= 2x4 for alignment), gridRes
+  computeStorageBuffer = device.createBuffer({
+    size: (4 + 4) * 4,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
+ 
   // 4x4 modelview, grid res, time, 2x programmable value
-  renderUniformBuffer = device.createBuffer({size: (16 + 1 + 1 + 2) * 4,
+  renderUniformBuffer = device.createBuffer({
+    size: (16 + 1 + 1 + 2) * 4,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
 
   for(let i=0; i<2; i++) {
-    gridBuffer[i] = device.createBuffer({size: GRID_RES * GRID_RES * GRID_RES * 4,
+    gridBuffer[i] = device.createBuffer({
+      size: GRID_RES * GRID_RES * GRID_RES * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
+  }
+
+  for(let i=0; i<2; i++) {
+    computeBindGroup[i] = device.createBindGroup({
+      layout: computeBindGroupLayout,
+      entries: [
+        {binding: 0, resource: {buffer: computeStorageBuffer}},
+        {binding: 1, resource: {buffer: gridBuffer[i]}},
+        {binding: 2, resource: {buffer: gridBuffer[1 - i]}}
+      ]
+    });
 
     renderBindGroup[i] = device.createBindGroup({
       layout: renderBindGroupLayout,
       entries: [
         {binding: 0, resource: {buffer: renderUniformBuffer}},
-        {binding: 1, resource: {buffer: gridBuffer[i]}}
+        {binding: 1, resource: {buffer: gridBuffer[1 - i]}}
       ]
     });
   }
@@ -208,13 +240,24 @@ async function createGPUResources()
 async function createPipelines()
 {
   let shader = await loadTextFile("contentShader.wgsl");
+
+  computePipeline = await createComputePipeline(shader, computeBindGroupLayout);
   renderPipeline = await createRenderPipeline(shader, renderBindGroupLayout);
 }
 
 function render(time)
 {
-  if (audioContext === undefined && start === undefined)
+  if (audioContext === undefined && start === undefined) {
     start = time;
+    lastUpdate = time;
+  }
+
+  if(time - lastUpdate > 2500) {
+    let workgroupSize = Math.ceil(GRID_RES / 4);
+    encodeComputePassAndSubmit(computePipeline, computeBindGroup[index], workgroupSize, workgroupSize, workgroupSize);
+    index = (index + 1) % 2;
+    lastUpdate = time;
+  }
 
   device.queue.writeBuffer(renderUniformBuffer, 0, new Float32Array([
       ...viewMatrix,
@@ -243,11 +286,6 @@ function setupPerformanceTimer(timerName)
     }).catch(function(err) {
       console.log(err);
     });
-}
-
-function switchGrid()
-{
-  index = (index + 1) % 2;
 }
 
 function resetView()
@@ -305,8 +343,7 @@ function handleMouseMoveEvent(e)
   }
 
   // Pitch locally, yaw globally to avoid unwanted roll
-  vec3.transformMat4(
-      dir, mat4.rotation(mat4.getAxis(viewMatrix, 0), pitch), dir);
+  vec3.transformMat4(dir, mat4.rotation(mat4.getAxis(viewMatrix, 0), pitch), dir);
   vec3.transformMat4(dir, mat4.rotationY(yaw), dir);
 
   computeViewMatrix();
@@ -335,11 +372,15 @@ function startRender()
 
   let grid = new Uint32Array(GRID_RES * GRID_RES * GRID_RES);
 
-  for(let j=0; j<2; j++) {
-    for(let i=0; i<grid.length; i++)
-      grid[i] = Math.random() > (0.99 * 0.5 * (j + 1)) ? 1 : 0;
-    device.queue.writeBuffer(gridBuffer[j], 0, grid);
+  for(let i=0; i<2; i++) {
+    for(let j=0; j<grid.length; j++)
+      grid[j] = Math.random() > (0.99 * 0.5 * (i + 1)) ? 1 : 0;
+    
+    device.queue.writeBuffer(gridBuffer[i], 0, grid);
   }
+
+  device.queue.writeBuffer(computeStorageBuffer, 0, new Uint32Array([
+      0, 0, 0, 0, GRID_RES - 1, GRID_RES - 1, GRID_RES - 1, 0]));
 
   document.querySelector("button").removeEventListener("click", startRender);
 
@@ -367,7 +408,6 @@ function startRender()
 
   requestAnimationFrame(render);
 
-  setInterval(switchGrid, 5000);
   setInterval(createPipelines, 500); // Reload shader
 }
 
