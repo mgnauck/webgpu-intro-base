@@ -1,22 +1,3 @@
-struct State {
-  minCell: vec4u,
-  maxCell: vec4u,
-}
-
-@group(0) @binding(0) var<storage, read_write> state : State; 
-@group(0) @binding(1) var<storage, read> inGrid : array<u32>; 
-@group(0) @binding(2) var<storage, read_write> outGrid : array<u32>; 
-
-@compute @workgroup_size(4,4,4)
-fn m(@builtin(global_invocation_id) globalId: vec3u)
-{
-  if(globalId.x >= state.maxCell.x || globalId.y >= state.maxCell.y || globalId.y >= state.maxCell.z) {
-    return;
-  }  
-}
-
-///////////
-
 struct Uniforms
 {
   cameraToWorld: mat4x4f,
@@ -25,13 +6,16 @@ struct Uniforms
   freeValue: vec2f,
 }
 
+// TODO Replace by string literals
 const WIDTH = 800;
-const HEIGHT = 500;
+const HEIGHT = WIDTH / 1.6;
+
 const EPSILON = 0.001;
 const HEMISPHERE = vec3f(0.3, 0.3, 0.6);
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
-@group(0) @binding(1) var<storage> grid : array<u32>; 
+@group(0) @binding(1) var<storage> grid : array<u32>;
+@group(0) @binding(2) var<storage, read_write> outputGrid : array<u32>;
 
 fn maxComp(v: vec3f) -> f32
 {
@@ -56,7 +40,7 @@ fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, invDir: vec3f, tmin: 
 
 fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, gridRes: f32, dist: ptr<function, f32>, norm: ptr<function, vec3f>) -> bool
 {
-  let gridOfs = vec3f(1.0, gridRes, gridRes * gridRes); 
+  let gridMul = vec3f(1.0, gridRes, gridRes * gridRes);
   let stepDir = sign(invDir);
   var cell = floor(ori);
   var t = (vec3f(0.5) + 0.5 * stepDir - fract(ori)) * invDir;
@@ -69,7 +53,7 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, gridRes: f32, dist: ptr<fu
 
     *dist = dot(mask, (vec3f(0.5) - 0.5 * stepDir + cell - ori) * invDir);
 
-    if(grid[u32(dot(gridOfs, cell))] > 0) {
+    if(grid[u32(dot(gridMul, cell))] > 0) {
       *norm = -mask * stepDir;
       return true;
     }
@@ -87,7 +71,7 @@ fn calcLightContribution(pos: vec3f, dir: vec3f, norm: vec3f, dist: f32) -> vec3
     return vec3f(0);
   }
 
-  var sky = (0.4 + norm.y * 0.6);
+  var sky = (0.4 - norm.y * 0.6);
   return HEMISPHERE * sky * exp(4 * -dist);
 }
 
@@ -96,10 +80,24 @@ fn renderBackground(o: vec3f, d: vec3f) -> vec3f
   return HEMISPHERE * 0.001;
 }
 
+@compute @workgroup_size(4,4,4)
+fn c(@builtin(global_invocation_id) globalId: vec3u)
+{
+  let gridRes = u32(uniforms.gridRes);
+
+  if(globalId.x >= gridRes || globalId.y >= gridRes || globalId.y >= gridRes) {
+    return;
+  }
+
+  let gridMul = vec3u(1, gridRes, gridRes * gridRes); 
+  let index = dot(gridMul, globalId);
+
+  // TODO
+}
+
 @vertex
 fn v(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f
 {
-  // TODO Check why Y is flipped
   let pos = array<vec2f, 4>(vec2f(-1, 1), vec2f(-1, -1), vec2f(1), vec2f(1, -1));
   return vec4f(pos[vertexIndex], 0, 1);
 }
@@ -108,7 +106,7 @@ fn v(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f
 fn f(@builtin(position) position: vec4f) -> @location(0) vec4f
 {
   let time = uniforms.time; 
-  let verticalFovInDeg = 60.0;
+  let verticalFovInDeg = 50.0 - uniforms.freeValue.x;
   
   let fragCoord = position.xy;
   let uv = (fragCoord - vec2f(WIDTH, HEIGHT) * 0.5) / f32(HEIGHT);
