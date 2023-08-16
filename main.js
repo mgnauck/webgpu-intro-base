@@ -1,4 +1,4 @@
-import {mat4, utils, vec3} from "https://wgpu-matrix.org/dist/1.x/wgpu-matrix.module.js";
+import {mat4, utils, vec3} from "https://wgpu-matrix.org/dist/2.x/wgpu-matrix.module.js";
 
 const FULLSCREEN = false;
 const AUDIO = false;
@@ -12,6 +12,7 @@ const AUDIO_HEIGHT = 4096;
 
 const GRID_RES = 128.0;
 
+const UP = [0, 1, 0];
 const MOVE_VELOCITY = 0.5;
 const LOOK_VELOCITY = 0.025;
 const WHEEL_VELOCITY = 0.0025;
@@ -236,7 +237,7 @@ function render(time)
   }
 
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
-      ...viewMatrix,
+      ...mat4.inverse(viewMatrix),
       GRID_RES,
       AUDIO ? audioContext.currentTime : ((time - start) / 1000.0),
       programmableValue, 1.0
@@ -273,19 +274,17 @@ function resetView()
 
 function computeViewMatrix()
 {
-  viewMatrix = mat4.lookAt(eye, vec3.add(eye, dir), vec3.create(0, 1, 0));
+  viewMatrix = mat4.lookAt(eye, vec3.add(eye, dir), UP);
 }
 
 function handleKeyEvent(e)
 {
   switch (e.key) {
     case "a":
-      vec3.add(
-          eye, vec3.scale(mat4.getAxis(viewMatrix, 0), -MOVE_VELOCITY), eye);
+      vec3.add(eye, vec3.scale(vec3.cross(dir, UP), -MOVE_VELOCITY), eye);
       break;
     case "d":
-      vec3.add(
-          eye, vec3.scale(mat4.getAxis(viewMatrix, 0), MOVE_VELOCITY), eye);
+      vec3.add(eye, vec3.scale(vec3.cross(dir, UP), MOVE_VELOCITY), eye);
       break;
     case "w":
       vec3.add(eye, vec3.scale(dir, MOVE_VELOCITY), eye);
@@ -319,7 +318,7 @@ function handleMouseMoveEvent(e)
   }
 
   // Pitch locally, yaw globally to avoid unwanted roll
-  vec3.transformMat4(dir, mat4.rotation(mat4.getAxis(viewMatrix, 0), pitch), dir);
+  vec3.transformMat4(dir, mat4.rotation(vec3.cross(dir, UP), pitch), dir);
   vec3.transformMat4(dir, mat4.rotationY(yaw), dir);
 
   computeViewMatrix();
