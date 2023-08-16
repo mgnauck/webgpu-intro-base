@@ -1,12 +1,15 @@
 struct Uniforms
 {
-  cameraToWorld: mat4x4f,
+  right: vec3f,
   gridRes: f32,
+  up: vec3f,
+  verticalFovInDeg: f32,
+  forward: vec3f,
   time: f32,
-  freeValue: vec2f,
+  eye: vec3f,
+  freeValue: f32
 }
 
-// TODO Replace by string literals
 const WIDTH = 800;
 const HEIGHT = WIDTH / 1.6;
 
@@ -105,17 +108,11 @@ fn v(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f
 @fragment
 fn f(@builtin(position) position: vec4f) -> @location(0) vec4f
 {
-  let time = uniforms.time; 
-  let verticalFovInDeg = 50.0 - uniforms.freeValue.x;
-  
-  let fragCoord = position.xy;
-  let uv = (fragCoord - vec2f(WIDTH, HEIGHT) * 0.5) / f32(HEIGHT);
+  let origin = uniforms.eye;
+  let dirEyeSpace = vec3f((position.xy - vec2f(WIDTH, HEIGHT) * 0.5) / f32(HEIGHT), 0.5 / tan(radians(0.5 * uniforms.verticalFovInDeg)));
+  let dir = uniforms.right * dirEyeSpace.x + uniforms.up * dirEyeSpace.y + uniforms.forward * dirEyeSpace.z;
 
-  let origin = vec4f(uniforms.cameraToWorld[3]).xyz;
-  let dirEyeSpace = normalize(vec3f(uv, -0.5 / tan(radians(0.5 * verticalFovInDeg))));
-  let dir = (uniforms.cameraToWorld * vec4f(dirEyeSpace, 0.0)).xyz;
-  let invDir = 1.0 / dir;
- 
+  let invDir = 1.0 / dir; 
   var col = renderBackground(origin, dir);
   var tmin: f32;
   var tmax: f32;
@@ -123,7 +120,7 @@ fn f(@builtin(position) position: vec4f) -> @location(0) vec4f
   var norm: vec3f;
 
   if(intersectAabb(vec3f(0), vec3f(uniforms.gridRes), origin, invDir, &tmin, &tmax)) {
-    tmin = max(tmin, 0.0) - EPSILON;
+    tmin = max(tmin - EPSILON, -EPSILON);
     if(traverseGrid(origin + tmin * dir, invDir, tmax - tmin, uniforms.gridRes, &t, &norm)) {
       col = calcLightContribution(origin + (tmin + t) * dir, dir, norm, (tmin + t) / tmax);
     }

@@ -30,7 +30,7 @@ let renderPassDescriptor;
 let canvas;
 let context;
 
-let eye, right, up, dir;
+let right, up, fwd, eye;
 let programmableValue;
 
 let start, lastUpdate;
@@ -175,9 +175,9 @@ async function createGPUResources()
     ]
   });
  
-  // 4x4 modelview, grid res, time, 2x programmable value
+  // 4*vec3f, grid res, time, programmable value
   uniformBuffer = device.createBuffer({
-    size: (16 + 1 + 1 + 2) * 4,
+    size: 16 * 4,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
 
   for(let i=0; i<2; i++) {
@@ -233,14 +233,15 @@ function render(time)
   }
 
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
-      ...right, 0.0,
-      ...up, 0.0,
-      ...vec3Negate(dir), 0.0,
-      ...eye, 1.0,
-      GRID_RES,
-      AUDIO ? audioContext.currentTime : ((time - start) / 1000.0),
-      programmableValue, 1.0
-    ]));
+    ...right,
+    GRID_RES,
+    ...up,
+    50.0, // fov
+    ...fwd,
+    AUDIO ? audioContext.currentTime : ((time - start) / 1000.0),
+    ...eye,
+    programmableValue
+  ]));
 
   setupPerformanceTimer("Render");
 
@@ -262,13 +263,6 @@ function setupPerformanceTimer(timerName)
     }).catch(function(err) {
       console.log(err);
     });
-}
-
-function resetView()
-{
-  eye = [0, 0, GRID_RES + 5.0];
-  dir = [0, 0, -1];
-  programmableValue = 0.0;
 }
 
 function vec3Add(a, b)
@@ -330,10 +324,18 @@ function axisRotation(axis, angle)
           0, 0, 0, 1]
 }
 
+function resetView()
+{
+  eye = [0, 0, GRID_RES + 5.0];
+  fwd = [0, 0, -1];
+
+  programmableValue = 0.0;
+}
+
 function computeView()
 {
-  right = vec3Normalize(vec3Cross(dir, [0, 1, 0]));
-  up = vec3Cross(right, dir);
+  right = vec3Normalize(vec3Cross(fwd, [0, 1, 0]));
+  up = vec3Cross(right, fwd);
 }
 
 function handleKeyEvent(e)
@@ -346,10 +348,10 @@ function handleKeyEvent(e)
       eye = vec3Add(eye, vec3Scale(right, MOVE_VELOCITY));
       break;
     case "w":
-      eye = vec3Add(eye, vec3Scale(dir, MOVE_VELOCITY));
+      eye = vec3Add(eye, vec3Scale(fwd, MOVE_VELOCITY));
       break;
     case "s":
-      eye = vec3Add(eye, vec3Scale(dir, -MOVE_VELOCITY));
+      eye = vec3Add(eye, vec3Scale(fwd, -MOVE_VELOCITY));
       break;
     case "r":
       resetView();
@@ -364,7 +366,7 @@ function handleMouseMoveEvent(e)
   let yaw = -e.movementX * LOOK_VELOCITY;
   let pitch = e.movementY * LOOK_VELOCITY;
 
-  const currentPitch = Math.acos(dir[1]);
+  const currentPitch = Math.acos(fwd[1]);
   const newPitch = currentPitch - pitch;
   const minPitch = Math.PI / 180.0;
   const maxPitch = 179.0 * Math.PI / 180.0;
@@ -377,8 +379,8 @@ function handleMouseMoveEvent(e)
   }
 
   // Pitch locally, yaw globally to avoid unwanted roll
-  dir = vec3Transform(dir, axisRotation(right, pitch));
-  dir = vec3Transform(dir, axisRotation([0, 1, 0], yaw));
+  fwd = vec3Transform(fwd, axisRotation(right, pitch));
+  fwd = vec3Transform(fwd, axisRotation([0, 1, 0], yaw));
 
   computeView();
 }
