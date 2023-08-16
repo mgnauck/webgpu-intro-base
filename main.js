@@ -1,5 +1,3 @@
-import {mat4, utils, vec3} from "https://wgpu-matrix.org/dist/2.x/wgpu-matrix.module.js";
-
 const FULLSCREEN = false;
 const AUDIO = false;
 
@@ -12,7 +10,6 @@ const AUDIO_HEIGHT = 4096;
 
 const GRID_RES = 128.0;
 
-const UP = [0, 1, 0];
 const MOVE_VELOCITY = 0.5;
 const LOOK_VELOCITY = 0.025;
 const WHEEL_VELOCITY = 0.0025;
@@ -33,8 +30,7 @@ let renderPassDescriptor;
 let canvas;
 let context;
 
-let viewMatrix;
-let eye, dir;
+let eye, right, up, dir;
 let programmableValue;
 
 let start, lastUpdate;
@@ -237,7 +233,10 @@ function render(time)
   }
 
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
-      ...mat4.inverse(viewMatrix),
+      ...right, 0.0,
+      ...up, 0.0,
+      ...vec3Negate(dir), 0.0,
+      ...eye, 1.0,
       GRID_RES,
       AUDIO ? audioContext.currentTime : ((time - start) / 1000.0),
       programmableValue, 1.0
@@ -267,37 +266,97 @@ function setupPerformanceTimer(timerName)
 
 function resetView()
 {
-  eye = vec3.create(0, 0, GRID_RES + 10.0);
-  dir = vec3.create(0, 0, -1);
+  eye = [0, 0, GRID_RES + 5.0];
+  dir = [0, 0, -1];
   programmableValue = 0.0;
 }
 
-function computeViewMatrix()
+function vec3Add(a, b)
 {
-  viewMatrix = mat4.lookAt(eye, vec3.add(eye, dir), UP);
+  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+}
+
+function vec3Negate(v)
+{
+  return [-v[0], -v[1], -v[2]];
+}
+
+function vec3Scale(v, s)
+{
+  return [v[0] * s, v[1] * s, v[2] * s];
+}
+
+function vec3Cross(a, b)
+{
+  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+
+function vec3Normalize(v)
+{
+  let invLen = 1.0 / Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+  return [v[0] * invLen, v[1] * invLen, v[2] * invLen];
+}
+
+function vec3Transform(v, m)
+{
+  const x = v[0];
+  const y = v[1];
+  const z = v[2];
+
+  return [x * m[0] + y * m[4] + z * m[8],
+          x * m[1] + y * m[5] + z * m[9],
+          x * m[2] + y * m[6] + z * m[10]];
+}
+
+function axisRotation(axis, angle)
+{
+  let x = axis[0];
+  let y = axis[1];
+  let z = axis[2];
+  const l = 1.0 / Math.sqrt(x * x + y * y + z * z);
+  x *= l;
+  y *= l;
+  z *= l;
+  const xx = x * x;
+  const yy = y * y;
+  const zz = z * z;
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const oneMinusCosine = 1 - c;
+
+  return [xx + (1 - xx) * c, x * y * oneMinusCosine + z * s, x * z * oneMinusCosine - y * s, 0,
+          x * y * oneMinusCosine - z * s, yy + (1 - yy) * c, y * z * oneMinusCosine + x * s, 0,
+          x * z * oneMinusCosine + y * s, y * z * oneMinusCosine - x * s, zz + (1 - zz) * c, 0,
+          0, 0, 0, 1]
+}
+
+function computeView()
+{
+  right = vec3Normalize(vec3Cross(dir, [0, 1, 0]));
+  up = vec3Cross(right, dir);
 }
 
 function handleKeyEvent(e)
 {
   switch (e.key) {
     case "a":
-      vec3.add(eye, vec3.scale(vec3.cross(dir, UP), -MOVE_VELOCITY), eye);
+      eye = vec3Add(eye, vec3Scale(right, -MOVE_VELOCITY));
       break;
     case "d":
-      vec3.add(eye, vec3.scale(vec3.cross(dir, UP), MOVE_VELOCITY), eye);
+      eye = vec3Add(eye, vec3Scale(right, MOVE_VELOCITY));
       break;
     case "w":
-      vec3.add(eye, vec3.scale(dir, MOVE_VELOCITY), eye);
+      eye = vec3Add(eye, vec3Scale(dir, MOVE_VELOCITY));
       break;
     case "s":
-      vec3.add(eye, vec3.scale(dir, -MOVE_VELOCITY), eye);
+      eye = vec3Add(eye, vec3Scale(dir, -MOVE_VELOCITY));
       break;
     case "r":
       resetView();
       break;
   };
 
-  computeViewMatrix();
+  computeView();
 }
 
 function handleMouseMoveEvent(e)
@@ -307,8 +366,8 @@ function handleMouseMoveEvent(e)
 
   const currentPitch = Math.acos(dir[1]);
   const newPitch = currentPitch - pitch;
-  const minPitch = utils.degToRad(1.0);
-  const maxPitch = utils.degToRad(179.0);
+  const minPitch = Math.PI / 180.0;
+  const maxPitch = 179.0 * Math.PI / 180.0;
 
   if (newPitch < minPitch) {
     pitch = currentPitch - minPitch;
@@ -318,10 +377,10 @@ function handleMouseMoveEvent(e)
   }
 
   // Pitch locally, yaw globally to avoid unwanted roll
-  vec3.transformMat4(dir, mat4.rotation(vec3.cross(dir, UP), pitch), dir);
-  vec3.transformMat4(dir, mat4.rotationY(yaw), dir);
+  dir = vec3Transform(dir, axisRotation(right, pitch));
+  dir = vec3Transform(dir, axisRotation([0, 1, 0], yaw));
 
-  computeViewMatrix();
+  computeView();
 }
 
 function handleMouseWheelEvent(e)
@@ -343,7 +402,7 @@ function startRender()
   }
 
   resetView();
-  computeViewMatrix();
+  computeView();
 
   let grid = new Uint32Array(GRID_RES * GRID_RES * GRID_RES);
   for(let j=0; j<grid.length; j++)
