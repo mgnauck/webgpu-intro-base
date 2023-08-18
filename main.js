@@ -364,7 +364,7 @@ function handleKeyEvent(e)
 function handleMouseMoveEvent(e)
 {
   let yaw = -e.movementX * LOOK_VELOCITY;
-  let pitch = e.movementY * LOOK_VELOCITY;
+  let pitch = -e.movementY * LOOK_VELOCITY;
 
   const currentPitch = Math.acos(fwd[1]);
   const newPitch = currentPitch - pitch;

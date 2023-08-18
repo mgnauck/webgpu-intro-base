@@ -74,7 +74,7 @@ fn calcLightContribution(pos: vec3f, dir: vec3f, norm: vec3f, dist: f32) -> vec3
     return vec3f(0);
   }
 
-  var sky = (0.4 - norm.y * 0.6);
+  var sky = (0.4 + norm.y * 0.6);
   return HEMISPHERE * sky * exp(4 * -dist);
 }
 
@@ -110,7 +110,7 @@ fn f(@builtin(position) position: vec4f) -> @location(0) vec4f
 {
   let origin = uniforms.eye;
   let dirEyeSpace = vec3f((position.xy - vec2f(WIDTH, HEIGHT) * 0.5) / f32(HEIGHT), 0.5 / tan(radians(0.5 * uniforms.verticalFovInDeg)));
-  let dir = uniforms.right * dirEyeSpace.x + uniforms.up * dirEyeSpace.y + uniforms.forward * dirEyeSpace.z;
+  let dir = uniforms.right * dirEyeSpace.x - uniforms.up * dirEyeSpace.y + uniforms.forward * dirEyeSpace.z;
 
   let invDir = 1.0 / dir; 
   var col = renderBackground(origin, dir);
