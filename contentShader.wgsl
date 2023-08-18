@@ -30,6 +30,66 @@ fn minComp(v: vec3f) -> f32
   return min(v.x, min(v.y, v.z));
 }
 
+fn getCell(cellX: u32, cellY: u32, cellZ: u32, gridMul: ptr<function, vec3u>) -> u32
+{
+  return grid[(cellX % (*gridMul).y) + (cellY % (*gridMul).y) * (*gridMul).y + (cellZ % (*gridMul).y) * (*gridMul).z];
+}
+
+fn getActiveNeighbourCount(cell: vec3u, gridMul: ptr<function, vec3u>) -> u32
+{
+  // TODO Optimize somewhat
+  return  getCell(cell.x, cell.y + 1, cell.z, gridMul) +
+          getCell(cell.x + 1, cell.y + 1, cell.z, gridMul) +
+          getCell(cell.x - 1, cell.y + 1, cell.z, gridMul) +
+          getCell(cell.x, cell.y + 1, cell.z + 1, gridMul) +
+          getCell(cell.x, cell.y + 1, cell.z - 1, gridMul) +
+          getCell(cell.x + 1, cell.y + 1, cell.z + 1, gridMul) +
+          getCell(cell.x + 1, cell.y + 1, cell.z - 1, gridMul) +
+          getCell(cell.x - 1, cell.y + 1, cell.z + 1, gridMul) +
+          getCell(cell.x - 1, cell.y + 1, cell.z - 1, gridMul) +
+          getCell(cell.x + 1, cell.y, cell.z, gridMul) +
+          getCell(cell.x - 1, cell.y, cell.z, gridMul) +
+          getCell(cell.x, cell.y, cell.z + 1, gridMul) +
+          getCell(cell.x, cell.y, cell.z - 1, gridMul) +
+          getCell(cell.x + 1, cell.y, cell.z + 1, gridMul) +
+          getCell(cell.x + 1, cell.y, cell.z - 1, gridMul) +
+          getCell(cell.x - 1, cell.y, cell.z + 1, gridMul) +
+          getCell(cell.x - 1, cell.y, cell.z - 1, gridMul) +
+          getCell(cell.x, cell.y - 1, cell.z, gridMul) +
+          getCell(cell.x + 1, cell.y - 1, cell.z, gridMul) +
+          getCell(cell.x - 1, cell.y - 1, cell.z, gridMul) +
+          getCell(cell.x, cell.y - 1, cell.z + 1, gridMul) +
+          getCell(cell.x, cell.y - 1, cell.z - 1, gridMul) +
+          getCell(cell.x + 1, cell.y - 1, cell.z + 1, gridMul) +
+          getCell(cell.x + 1, cell.y - 1, cell.z - 1, gridMul) +
+          getCell(cell.x - 1, cell.y - 1, cell.z + 1, gridMul) +
+          getCell(cell.x - 1, cell.y - 1, cell.z - 1, gridMul);
+}
+
+@compute @workgroup_size(4,4,4)
+fn c(@builtin(global_invocation_id) globalId: vec3u)
+{
+  let gridRes = u32(uniforms.gridRes);
+  var gridMul = vec3u(1, gridRes, gridRes * gridRes);
+ 
+  let neighbourCount = getActiveNeighbourCount(globalId, &gridMul);
+  let index = dot(globalId, gridMul); 
+
+  if(grid[index] == 1) {
+    if(neighbourCount < 5 && neighbourCount > 6) {
+      outputGrid[index] = 0;
+    } else {
+      outputGrid[index] = 1;
+    }
+  } else {
+    if(neighbourCount == 4) {
+      outputGrid[index] = 1;
+    } else {
+      outputGrid[index] = 0;
+    }
+  }
+}
+
 fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, invDir: vec3f, tmin: ptr<function, f32>, tmax: ptr<function, f32>) -> bool
 {
   let t0 = (minExt - ori) * invDir;
@@ -67,7 +127,7 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, gridRes: f32, dist: ptr<fu
 
 fn calcLightContribution(pos: vec3f, dir: vec3f, norm: vec3f, dist: f32) -> vec3f
 {
-  let border = vec3f(0.5 - 0.075);
+  let border = vec3f(0.5 - 0.045);
   let wire = (vec3f(1) - abs(norm)) * abs(fract(pos) - vec3f(0.5));
 
   if(any(vec3<bool>(step(border, wire)))) {
@@ -81,21 +141,6 @@ fn calcLightContribution(pos: vec3f, dir: vec3f, norm: vec3f, dist: f32) -> vec3
 fn renderBackground(o: vec3f, d: vec3f) -> vec3f
 {
   return HEMISPHERE * 0.001;
-}
-
-@compute @workgroup_size(4,4,4)
-fn c(@builtin(global_invocation_id) globalId: vec3u)
-{
-  let gridRes = u32(uniforms.gridRes);
-
-  if(globalId.x >= gridRes || globalId.y >= gridRes || globalId.y >= gridRes) {
-    return;
-  }
-
-  let gridMul = vec3u(1, gridRes, gridRes * gridRes); 
-  let index = dot(gridMul, globalId);
-
-  // TODO
 }
 
 @vertex

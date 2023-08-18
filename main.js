@@ -2,13 +2,14 @@ const FULLSCREEN = false;
 const AUDIO = false;
 
 const ASPECT = 1.6;
-const CANVAS_WIDTH = 800;
+const CANVAS_WIDTH = 1024;
 const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 
 const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
 
 const GRID_RES = 128.0;
+const UPDATE_INTERVAL = 100;
 
 const MOVE_VELOCITY = 0.5;
 const LOOK_VELOCITY = 0.025;
@@ -35,6 +36,7 @@ let programmableValue;
 
 let start, lastUpdate;
 let simulationSteps = 0;
+let pause = false;
 
 function loadTextFile(url)
 {
@@ -225,9 +227,9 @@ function render(time)
     lastUpdate = time;
   }
 
-  if(time - lastUpdate > 2500) {
-    let workgroupSize = Math.ceil(GRID_RES / 4);
-    encodeComputePassAndSubmit(computePipeline, bindGroup[simulationSteps % 2], workgroupSize, workgroupSize, workgroupSize);
+  if(!pause && time - lastUpdate > UPDATE_INTERVAL) {
+    let workgroupCnt = Math.ceil(GRID_RES / 4);
+    encodeComputePassAndSubmit(computePipeline, bindGroup[simulationSteps % 2], workgroupCnt, workgroupCnt, workgroupCnt);
     simulationSteps++;
     lastUpdate = time;
   }
@@ -324,10 +326,21 @@ function axisRotation(axis, angle)
           0, 0, 0, 1]
 }
 
+function initGrid()
+{
+  let grid = new Uint32Array(GRID_RES * GRID_RES * GRID_RES);
+  for(let j=0; j<grid.length; j++)
+    grid[j] = Math.random() > 0.998 ? 1 : 0;
+    
+  device.queue.writeBuffer(gridBuffer[0], 0, grid);
+  device.queue.writeBuffer(gridBuffer[1], 0, grid); 
+}  
+
 function resetView()
 {
-  eye = [0, 0, GRID_RES + 5.0];
-  fwd = [0, 0, -1];
+  eye = [GRID_RES, GRID_RES, GRID_RES];
+  eye = vec3Add(eye, vec3Scale(eye, 0.25));
+  fwd = vec3Normalize(vec3Add([GRID_RES/2, GRID_RES/2, GRID_RES/2], vec3Negate(eye)));
 
   programmableValue = 0.0;
 }
@@ -356,6 +369,12 @@ function handleKeyEvent(e)
     case "r":
       resetView();
       break;
+    case "i":
+      initGrid();
+      break;
+    case "p":
+      pause = !pause;
+    break;
   };
 
   computeView();
@@ -405,13 +424,7 @@ function startRender()
 
   resetView();
   computeView();
-
-  let grid = new Uint32Array(GRID_RES * GRID_RES * GRID_RES);
-  for(let j=0; j<grid.length; j++)
-    grid[j] = Math.random() > 0.9 ? 1 : 0;
-    
-  device.queue.writeBuffer(gridBuffer[0], 0, grid);
-  device.queue.writeBuffer(gridBuffer[1], 0, grid);
+  initGrid();
 
   document.querySelector("button").removeEventListener("click", startRender);
 
