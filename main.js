@@ -9,7 +9,8 @@ const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
 
 const GRID_RES = 128.0;
-const UPDATE_INTERVAL = 100;
+const SEED_AREA = 5;
+const UPDATE_INTERVAL = 200;
 
 const MOVE_VELOCITY = 0.5;
 const LOOK_VELOCITY = 0.025;
@@ -37,6 +38,7 @@ let programmableValue;
 let start, lastUpdate;
 let simulationSteps = 0;
 let pause = false;
+let initialGrid = new Uint32Array(GRID_RES * GRID_RES * GRID_RES);
 
 function loadTextFile(url)
 {
@@ -327,14 +329,23 @@ function axisRotation(axis, angle)
 }
 
 function initGrid()
+{ 
+  device.queue.writeBuffer(gridBuffer[0], 0, initialGrid);
+  device.queue.writeBuffer(gridBuffer[1], 0, initialGrid); 
+}
+
+function createGrid()
 {
-  let grid = new Uint32Array(GRID_RES * GRID_RES * GRID_RES);
-  for(let j=0; j<grid.length; j++)
-    grid[j] = Math.random() > 0.998 ? 1 : 0;
-    
-  device.queue.writeBuffer(gridBuffer[0], 0, grid);
-  device.queue.writeBuffer(gridBuffer[1], 0, grid); 
-}  
+  for(let i=0; i<initialGrid.length; i++)
+    initialGrid[i] = 0;
+
+  for(let k=GRID_RES * 0.5 - SEED_AREA; k<GRID_RES * 0.5 + SEED_AREA; k++)
+    for(let j=GRID_RES * 0.5 - SEED_AREA; j<GRID_RES * 0.5 + SEED_AREA; j++)
+      for(let i=GRID_RES * 0.5 - SEED_AREA; i<GRID_RES * 0.5 + SEED_AREA; i++)
+        initialGrid[GRID_RES * GRID_RES * k + GRID_RES * j + i] = Math.random() > 0.6 ? 1 : 0;
+  
+  initGrid();
+}   
 
 function resetView()
 {
@@ -370,7 +381,13 @@ function handleKeyEvent(e)
       resetView();
       break;
     case "i":
-      initGrid();
+      initGrid()
+      break;
+    case "n":
+      createGrid();
+      break;
+    case "l":
+      createPipelines();
       break;
     case "p":
       pause = !pause;
@@ -424,7 +441,7 @@ function startRender()
 
   resetView();
   computeView();
-  initGrid();
+  createGrid();
 
   document.querySelector("button").removeEventListener("click", startRender);
 
