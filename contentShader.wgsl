@@ -17,8 +17,10 @@ const EPSILON = 0.001;
 const HEMISPHERE = vec3f(0.3, 0.3, 0.6);
 
 const states = 5u;
-// TODO Separate rules for dead and alive cells
-const rules = array<u32, 27>(0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+const rules = array<array<u32, 27>, 2>(
+  array<u32, 27>(0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // birth
+  array<u32, 27>(0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)  // live
+);
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(0) @binding(1) var<storage> grid : array<u32>;
@@ -34,14 +36,14 @@ fn minComp(v: vec3f) -> f32
   return min(v.x, min(v.y, v.z));
 }
 
-fn getCell(cellX: u32, cellY: u32, cellZ: u32, gridMul: ptr<function, vec3u>) -> u32
+fn getCell(cellX: i32, cellY: i32, cellZ: i32, gridMul: ptr<function, vec3i>) -> u32
 {
   let v = grid[(cellX % (*gridMul).y) + (cellY % (*gridMul).y) * (*gridMul).y + (cellZ % (*gridMul).y) * (*gridMul).z]; 
   // Consider only states 0 and 1. Cells in refactory period do NOT count as active neighbours.
   return 1 - min(abs(1 - v), 1);
 }
 
-fn getNeumannNeighbourCountWrap(cell: vec3u, gridMul: ptr<function, vec3u>) -> u32
+fn getNeumannNeighbourCountWrap(cell: vec3i, gridMul: ptr<function, vec3i>) -> u32
 {
   return  getCell(cell.x + 1, cell.y,     cell.z, gridMul) +
           getCell(cell.x - 1, cell.y,     cell.z, gridMul) +
@@ -51,7 +53,7 @@ fn getNeumannNeighbourCountWrap(cell: vec3u, gridMul: ptr<function, vec3u>) -> u
           getCell(cell.x,     cell.y,     cell.z - 1, gridMul);
 }
 
-fn getMooreNeighbourCountWrap(cell: vec3u, gridMul: ptr<function, vec3u>) -> u32
+fn getMooreNeighbourCountWrap(cell: vec3i, gridMul: ptr<function, vec3i>) -> u32
 {
   return  getCell(cell.x,     cell.y + 1, cell.z, gridMul) +
           getCell(cell.x + 1, cell.y + 1, cell.z, gridMul) +
@@ -81,73 +83,23 @@ fn getMooreNeighbourCountWrap(cell: vec3u, gridMul: ptr<function, vec3u>) -> u32
           getCell(cell.x - 1, cell.y - 1, cell.z - 1, gridMul);
 }
 
-fn getMooreNeighbourCount(cell: vec3u, gridMul: ptr<function, vec3u>) -> u32
-{
-  let minBound = vec3u(step(vec3f(0), vec3f(cell) - vec3f(1)));
-  let maxBound = vec3u(step(vec3f(0), vec3f(f32((*gridMul).y)) - vec3f(cell) + vec3f(1)));
-  return  maxBound.y * getCell(cell.x, cell.y + 1, cell.z, gridMul) +
-          maxBound.x * maxBound.y * getCell(cell.x + 1, cell.y + 1, cell.z, gridMul) +
-          minBound.x * maxBound.y * getCell(cell.x - 1, cell.y + 1, cell.z, gridMul) +
-          maxBound.y * maxBound.z * getCell(cell.x, cell.y + 1, cell.z + 1, gridMul) +
-          maxBound.y * minBound.z * getCell(cell.x, cell.y + 1, cell.z - 1, gridMul) +
-          maxBound.x * maxBound.y * maxBound.z * getCell(cell.x + 1, cell.y + 1, cell.z + 1, gridMul) +
-          maxBound.x * maxBound.y * minBound.z * getCell(cell.x + 1, cell.y + 1, cell.z - 1, gridMul) +
-          minBound.x * maxBound.y * maxBound.z * getCell(cell.x - 1, cell.y + 1, cell.z + 1, gridMul) +
-          minBound.x * maxBound.y * minBound.z * getCell(cell.x - 1, cell.y + 1, cell.z - 1, gridMul) +
-          maxBound.x * getCell(cell.x + 1, cell.y, cell.z, gridMul) +
-          minBound.x * getCell(cell.x - 1, cell.y, cell.z, gridMul) +
-          maxBound.z * getCell(cell.x, cell.y, cell.z + 1, gridMul) +
-          minBound.z * getCell(cell.x, cell.y, cell.z - 1, gridMul) +
-          maxBound.x * maxBound.z * getCell(cell.x + 1, cell.y, cell.z + 1, gridMul) +
-          maxBound.x * minBound.z * getCell(cell.x + 1, cell.y, cell.z - 1, gridMul) +
-          minBound.x * maxBound.z * getCell(cell.x - 1, cell.y, cell.z + 1, gridMul) +
-          minBound.x * minBound.z * getCell(cell.x - 1, cell.y, cell.z - 1, gridMul) +
-          minBound.y * getCell(cell.x, cell.y - 1, cell.z, gridMul) +
-          maxBound.x * minBound.z * getCell(cell.x + 1, cell.y - 1, cell.z, gridMul) +
-          minBound.x * minBound.y * getCell(cell.x - 1, cell.y - 1, cell.z, gridMul) +
-          minBound.y * maxBound.z * getCell(cell.x, cell.y - 1, cell.z + 1, gridMul) +
-          minBound.y * minBound.z * getCell(cell.x, cell.y - 1, cell.z - 1, gridMul) +
-          maxBound.x * minBound.y * maxBound.z * getCell(cell.x + 1, cell.y - 1, cell.z + 1, gridMul) +
-          maxBound.x * minBound.y * minBound.z * getCell(cell.x + 1, cell.y - 1, cell.z - 1, gridMul) +
-          minBound.x * minBound.y * maxBound.z * getCell(cell.x - 1, cell.y - 1, cell.z + 1, gridMul) +
-          minBound.x * minBound.y * minBound.z * getCell(cell.x - 1, cell.y - 1, cell.z - 1, gridMul);
-}
-
 @compute @workgroup_size(4,4,4)
 fn c(@builtin(global_invocation_id) globalId: vec3u)
 {
-  let gridRes = u32(uniforms.gridRes);
-  var gridMul = vec3u(1, gridRes, gridRes * gridRes);
- 
-  let index = dot(globalId, gridMul);
-  let value = grid[index];
-  let count = getMooreNeighbourCount(globalId, &gridMul);
+  let cell = vec3i(globalId);
+  let gridRes = i32(uniforms.gridRes);
+  var gridMul = vec3i(1, gridRes, gridRes * gridRes);
+  
+  // TODO Add min/max bound tracking
 
-  // TODO Fix general rule handling
-/*
-  switch(value) {
-    case 0: {
-      outputGrid[index] = rules[count];
-    }
-    case 1: {
-      outputGrid[index] += 1 - rules[count];
-    }
-    default: {
-      outputGrid[index] = (value + 1) % states;
-    }
-  }*/
-  if(value == 1) {
-    if(count == 4) {
-      outputGrid[index] = 1;
-    } else {
-      outputGrid[index] = 2;
-    }
-  }
-  if(value == 0 && count == 4) {
-    outputGrid[index] = 1;
-  }
+  let index = dot(cell, gridMul);
+  let value = grid[index];
+
   if(value > 1) {
     outputGrid[index] = (value + 1) % states;
+  } else {
+    let count = getMooreNeighbourCountWrap(cell, &gridMul);
+    outputGrid[index] = u32(abs(i32(value + value) - i32(rules[value][count])));
   }
 }
 
