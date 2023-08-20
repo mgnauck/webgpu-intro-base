@@ -16,7 +16,6 @@ const HEIGHT = WIDTH / 1.6;
 const EPSILON = 0.001;
 const HEMISPHERE = vec3f(0.3, 0.3, 0.6);
 
-const states = 5u;
 const rules = array<array<u32, 27>, 2>(
   array<u32, 27>(0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // birth
   array<u32, 27>(0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)  // live
@@ -36,71 +35,81 @@ fn minComp(v: vec3f) -> f32
   return min(v.x, min(v.y, v.z));
 }
 
-fn getCell(cellX: i32, cellY: i32, cellZ: i32, gridMul: ptr<function, vec3i>) -> u32
+fn getCell(x: i32, y: i32, z: i32, gridMul: ptr<function, vec3i>) -> u32
 {
-  let v = grid[(cellX % (*gridMul).y) + (cellY % (*gridMul).y) * (*gridMul).y + (cellZ % (*gridMul).y) * (*gridMul).z]; 
   // Consider only states 0 and 1. Cells in refactory period do NOT count as active neighbours.
-  return 1 - min(abs(1 - v), 1);
+  return 1 - min(abs(1 - grid[(*gridMul).z * z + (*gridMul).y * y + x]), 1);
 }
 
-fn getNeumannNeighbourCountWrap(cell: vec3i, gridMul: ptr<function, vec3i>) -> u32
+fn getNeumannNeighbourCountWrap(pos: vec3i, gridMul: ptr<function, vec3i>) -> u32
 {
-  return  getCell(cell.x + 1, cell.y,     cell.z, gridMul) +
-          getCell(cell.x - 1, cell.y,     cell.z, gridMul) +
-          getCell(cell.x,     cell.y + 1, cell.z, gridMul) +
-          getCell(cell.x,     cell.y - 1, cell.z, gridMul) +
-          getCell(cell.x,     cell.y,     cell.z + 1, gridMul) +
-          getCell(cell.x,     cell.y,     cell.z - 1, gridMul);
+  let res = vec3i((*gridMul).y);
+  let dec = (pos - vec3i(1)) % res;
+  let inc = (pos + vec3i(1)) % res;
+
+  return  getCell(inc.x, pos.y, pos.z, gridMul) +
+          getCell(dec.x, pos.y, pos.z, gridMul) +
+          getCell(pos.x, inc.y, pos.z, gridMul) +
+          getCell(pos.x, dec.y, pos.z, gridMul) +
+          getCell(pos.x, pos.y, inc.z, gridMul) +
+          getCell(pos.x, pos.y, dec.z, gridMul);
 }
 
-fn getMooreNeighbourCountWrap(cell: vec3i, gridMul: ptr<function, vec3i>) -> u32
+fn getMooreNeighbourCountWrap(pos: vec3i, gridMul: ptr<function, vec3i>) -> u32
 {
-  return  getCell(cell.x,     cell.y + 1, cell.z, gridMul) +
-          getCell(cell.x + 1, cell.y + 1, cell.z, gridMul) +
-          getCell(cell.x - 1, cell.y + 1, cell.z, gridMul) +
-          getCell(cell.x,     cell.y + 1, cell.z + 1, gridMul) +
-          getCell(cell.x,     cell.y + 1, cell.z - 1, gridMul) +
-          getCell(cell.x + 1, cell.y + 1, cell.z + 1, gridMul) +
-          getCell(cell.x + 1, cell.y + 1, cell.z - 1, gridMul) +
-          getCell(cell.x - 1, cell.y + 1, cell.z + 1, gridMul) +
-          getCell(cell.x - 1, cell.y + 1, cell.z - 1, gridMul) +
-          getCell(cell.x + 1, cell.y,     cell.z, gridMul) +
-          getCell(cell.x - 1, cell.y,     cell.z, gridMul) +
-          getCell(cell.x,     cell.y,     cell.z + 1, gridMul) +
-          getCell(cell.x,     cell.y,     cell.z - 1, gridMul) +
-          getCell(cell.x + 1, cell.y,     cell.z + 1, gridMul) +
-          getCell(cell.x + 1, cell.y,     cell.z - 1, gridMul) +
-          getCell(cell.x - 1, cell.y,     cell.z + 1, gridMul) +
-          getCell(cell.x - 1, cell.y,     cell.z - 1, gridMul) +
-          getCell(cell.x,     cell.y - 1, cell.z, gridMul) +
-          getCell(cell.x + 1, cell.y - 1, cell.z, gridMul) +
-          getCell(cell.x - 1, cell.y - 1, cell.z, gridMul) +
-          getCell(cell.x,     cell.y - 1, cell.z + 1, gridMul) +
-          getCell(cell.x,     cell.y - 1, cell.z - 1, gridMul) +
-          getCell(cell.x + 1, cell.y - 1, cell.z + 1, gridMul) +
-          getCell(cell.x + 1, cell.y - 1, cell.z - 1, gridMul) +
-          getCell(cell.x - 1, cell.y - 1, cell.z + 1, gridMul) +
-          getCell(cell.x - 1, cell.y - 1, cell.z - 1, gridMul);
+  let res = vec3i((*gridMul).y);
+  let dec = (pos - vec3i(1)) % res;
+  let inc = (pos + vec3i(1)) % res;
+
+  return  getCell(pos.x, inc.y, pos.z, gridMul) +
+          getCell(inc.x, inc.y, pos.z, gridMul) +
+          getCell(dec.x, inc.y, pos.z, gridMul) +
+          getCell(pos.x, inc.y, inc.z, gridMul) +
+          getCell(pos.x, inc.y, dec.z, gridMul) +
+          getCell(inc.x, inc.y, inc.z, gridMul) +
+          getCell(inc.x, inc.y, dec.z, gridMul) +
+          getCell(dec.x, inc.y, inc.z, gridMul) +
+          getCell(dec.x, inc.y, dec.z, gridMul) +
+          getCell(inc.x, pos.y, pos.z, gridMul) +
+          getCell(dec.x, pos.y, pos.z, gridMul) +
+          getCell(pos.x, pos.y, inc.z, gridMul) +
+          getCell(pos.x, pos.y, dec.z, gridMul) +
+          getCell(inc.x, pos.y, inc.z, gridMul) +
+          getCell(inc.x, pos.y, dec.z, gridMul) +
+          getCell(dec.x, pos.y, inc.z, gridMul) +
+          getCell(dec.x, pos.y, dec.z, gridMul) +
+          getCell(pos.x, dec.y, pos.z, gridMul) +
+          getCell(inc.x, dec.y, pos.z, gridMul) +
+          getCell(dec.x, dec.y, pos.z, gridMul) +
+          getCell(pos.x, dec.y, inc.z, gridMul) +
+          getCell(pos.x, dec.y, dec.z, gridMul) +
+          getCell(inc.x, dec.y, inc.z, gridMul) +
+          getCell(inc.x, dec.y, dec.z, gridMul) +
+          getCell(dec.x, dec.y, inc.z, gridMul) +
+          getCell(dec.x, dec.y, dec.z, gridMul);
+}
+
+fn evalMultiState(pos: vec3i, states: u32, gridMul: ptr<function, vec3i>)
+{
+  let index = dot(pos, *gridMul);
+  let value = grid[index];
+
+  if(value <= 1) {
+    let count = getMooreNeighbourCountWrap(pos, gridMul);
+    outputGrid[index] = u32(abs(i32(value + value) - i32(rules[value][count])));
+  } else { 
+    outputGrid[index] = (value + 1) % states;
+  }
 }
 
 @compute @workgroup_size(4,4,4)
 fn c(@builtin(global_invocation_id) globalId: vec3u)
 {
-  let cell = vec3i(globalId);
+  let currPos = vec3i(globalId);
   let gridRes = i32(uniforms.gridRes);
   var gridMul = vec3i(1, gridRes, gridRes * gridRes);
-  
-  // TODO Add min/max bound tracking
-
-  let index = dot(cell, gridMul);
-  let value = grid[index];
-
-  if(value > 1) {
-    outputGrid[index] = (value + 1) % states;
-  } else {
-    let count = getMooreNeighbourCountWrap(cell, &gridMul);
-    outputGrid[index] = u32(abs(i32(value + value) - i32(rules[value][count])));
-  }
+ 
+  evalMultiState(currPos, 5, &gridMul);
 }
 
 fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, invDir: vec3f, tmin: ptr<function, f32>, tmax: ptr<function, f32>) -> bool

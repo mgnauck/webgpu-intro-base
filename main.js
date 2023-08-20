@@ -10,7 +10,7 @@ const AUDIO_HEIGHT = 4096;
 
 const GRID_RES = 128.0;
 const SEED_AREA = 5;
-const UPDATE_INTERVAL = 200;
+const UPDATE_INTERVAL = 400;
 
 const MOVE_VELOCITY = 0.5;
 const LOOK_VELOCITY = 0.025;
@@ -226,14 +226,20 @@ function render(time)
 {
   if (audioContext === undefined && start === undefined) {
     start = time;
-    lastUpdate = time;
+    lastUpdate = AUDIO ? audioContext.currentTime : time;
   }
 
-  if(!pause && time - lastUpdate > UPDATE_INTERVAL) {
+  const currTime = AUDIO ? audioContext.currentTime : (time - start); 
+
+  if(!pause && currTime - lastUpdate > UPDATE_INTERVAL) {
     let workgroupCnt = Math.ceil(GRID_RES / 4);
     encodeComputePassAndSubmit(computePipeline, bindGroup[simulationSteps % 2], workgroupCnt, workgroupCnt, workgroupCnt);
     simulationSteps++;
-    lastUpdate = time;
+    lastUpdate += UPDATE_INTERVAL;
+  }
+
+  if(pause) {
+    lastUpdate = currTime;
   }
 
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
@@ -242,7 +248,7 @@ function render(time)
     ...up,
     50.0, // fov
     ...fwd,
-    AUDIO ? audioContext.currentTime : ((time - start) / 1000.0),
+    currTime,
     ...eye,
     programmableValue
   ]));
@@ -469,7 +475,7 @@ function startRender()
 
   requestAnimationFrame(render);
 
-  setInterval(createPipelines, 500); // Reload shader
+  //setInterval(createPipelines, 500); // Reload shader
 }
 
 async function main()
