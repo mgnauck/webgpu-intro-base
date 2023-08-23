@@ -244,14 +244,13 @@ function render(time)
   }
 
   const currTime = AUDIO ? (audioContext.currentTime * 1000.0) : (time - start);
-
   const commandEncoder = device.createCommandEncoder();
 
   if(!pause && (currTime - lastUpdate > UPDATE_INTERVAL)) {
-    let count = Math.ceil(GRID_RES / 4);
-
+    const count = Math.ceil(GRID_RES / 4);
+    // Reset grid min/max of output buffer
+    device.queue.writeBuffer(gridBuffer[1 - simulationSteps % 2], 12, initialGrid, 12, 24);
     encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationSteps % 2], count, count, count);
-
     simulationSteps++;
     lastUpdate += UPDATE_INTERVAL;
   }
@@ -362,16 +361,24 @@ function initGrid()
 
 function createGrid()
 {
-  for(let i=0; i<initialGrid.length; i++)
-    initialGrid[i] = 0;
-
+  // Grid multiplier
   initialGrid[0] = 1;
   initialGrid[1] = GRID_RES;
   initialGrid[2] = GRID_RES * GRID_RES;
 
-  for(let k=GRID_RES * 0.5 - SEED_AREA; k<GRID_RES * 0.5 + SEED_AREA; k++)
-    for(let j=GRID_RES * 0.5 - SEED_AREA; j<GRID_RES * 0.5 + SEED_AREA; j++)
-      for(let i=GRID_RES * 0.5 - SEED_AREA; i<GRID_RES * 0.5 + SEED_AREA; i++)
+  let min = GRID_RES / 2 - SEED_AREA;
+  initialGrid[3] = min - 1;
+  initialGrid[4] = min - 1;
+  initialGrid[5] = min - 1;
+  
+  let max = GRID_RES / 2 + SEED_AREA;
+  initialGrid[6] = max + 1;
+  initialGrid[7] = max + 1;
+  initialGrid[8] = max + 1;
+
+  for(let k=min; k<max; k++)
+    for(let j=min; j<max; j++)
+      for(let i=min; i<max; i++)
         initialGrid[9 + GRID_RES * GRID_RES * k + GRID_RES * j + i] = rand() > 0.6 ? 1 : 0;
   
   initGrid();

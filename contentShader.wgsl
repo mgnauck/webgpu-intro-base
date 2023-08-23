@@ -13,9 +13,25 @@ struct Uniforms
 struct Grid
 {
   mul: vec3i,
-  // TODO Make atomic
-  min: vec3i,
-  max: vec3i,
+  minx: u32,
+  miny: u32,
+  minz: u32,
+  maxx: u32,
+  maxy: u32,
+  maxz: u32,
+  arr: array<u32>
+}
+
+struct OutputGrid
+{
+  mul: vec3i,
+  // TODO Add proper padding so we can use vec3f in Grid struct
+  minx: atomic<u32>,
+  miny: atomic<u32>,
+  minz: atomic<u32>,
+  maxx: atomic<u32>,
+  maxy: atomic<u32>,
+  maxz: atomic<u32>,
   arr: array<u32>
 }
 
@@ -39,7 +55,7 @@ const rules = array<array<u32, 27>, 2>(
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(0) @binding(1) var<storage> grid: Grid;
-@group(0) @binding(2) var<storage, read_write> outputGrid: Grid;
+@group(0) @binding(2) var<storage, read_write> outputGrid: OutputGrid;
 
 fn maxComp(v: vec3f) -> f32
 {
@@ -115,9 +131,13 @@ fn evalMultiState(pos: vec3i, states: u32)
       let newValue = rules[0][getMooreNeighbourCountWrap(pos)];
       outputGrid.arr[index] = newValue;
       if(newValue == 1) {
-        // TODO make atomic
-        outputGrid.min = min(outputGrid.min, pos - vec3i(1));
-        outputGrid.max = max(outputGrid.max, pos + vec3i(1));
+        let s = grid.mul.y - 1;
+        atomicMin(&outputGrid.minx, u32(max(0, pos.x - 1)));
+        atomicMin(&outputGrid.miny, u32(max(0, pos.y - 1)));
+        atomicMin(&outputGrid.minz, u32(max(0, pos.z - 1)));
+        atomicMax(&outputGrid.maxx, u32(min(pos.x + 1, s)));
+        atomicMax(&outputGrid.maxy, u32(min(pos.y + 1, s)));
+        atomicMax(&outputGrid.maxz, u32(min(pos.z + 1, s)));
       }
     }
     case 1: {
@@ -134,7 +154,12 @@ fn evalMultiState(pos: vec3i, states: u32)
 @compute @workgroup_size(4,4,4)
 fn c(@builtin(global_invocation_id) globalId: vec3u)
 {
-  evalMultiState(vec3i(globalId), 5);
+  let gridMin = vec3f(f32(grid.minx), f32(grid.miny), f32(grid.minz));
+  let gridMax = vec3f(f32(grid.maxx), f32(grid.maxy), f32(grid.maxz));
+  let halfExtent = (gridMax - gridMin) * 0.5;
+  if(maxComp(abs(vec3f(globalId) - (gridMin + halfExtent)) / halfExtent) <= 1.0) {
+    evalMultiState(vec3i(globalId), 5);
+  }
 }
 
 fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, invDir: vec3f, tmin: ptr<function, f32>, tmax: ptr<function, f32>) -> bool
@@ -216,12 +241,16 @@ fn f(@builtin(position) position: vec4f) -> @location(0) vec4f
   var t: f32;
   var norm: vec3f;
 
-  if(intersectAabb(vec3f(0), vec3f(f32(grid.mul.y)), origin, invDir, &tmin, &tmax)) {
+  if(intersectAabb(vec3f(f32(grid.minx), f32(grid.miny), f32(grid.minz)), vec3f(f32(grid.maxx), f32(grid.maxy), f32(grid.maxz)), origin, invDir, &tmin, &tmax)) {
     tmin = max(tmin - EPSILON, -EPSILON);
     let state = traverseGrid(origin + tmin * dir, invDir, tmax - tmin, &t, &norm);
     if(state > 0) {
       col = shade(origin + (tmin + t) * dir, dir, norm, (tmin + t) / tmax, state);
-    }
+    } /*else
+    {
+      // Visualize grid box
+      col = vec3f(0.1);
+    }*/
   }
 
   return vec4f(pow(col, vec3f(0.4545)), 1.0);
