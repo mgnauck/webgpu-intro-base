@@ -2,7 +2,7 @@ const FULLSCREEN = false;
 const AUDIO = false;
 
 const ASPECT = 1.6;
-const CANVAS_WIDTH = 1024;
+const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 const FOV = 50.0;
 
@@ -11,7 +11,7 @@ const AUDIO_HEIGHT = 4096;
 
 const GRID_RES = 128.0;
 const SEED_AREA = 5;
-const UPDATE_INTERVAL = 200;
+const UPDATE_INTERVAL = 150.0;
 
 const MOVE_VELOCITY = 0.5;
 const LOOK_VELOCITY = 0.025;
@@ -40,6 +40,30 @@ let start, lastUpdate;
 let simulationSteps = 0;
 let pause = false;
 let initialGrid = new Uint32Array(9 + GRID_RES * GRID_RES * GRID_RES);
+
+let rand = splitmix32(xmur3("unik"));
+
+// https://github.com/bryc/code/blob/master/jshash/PRNGs.md
+function splitmix32(a) {
+  return function() {
+    a |= 0; a = a + 0x9e3779b9 | 0;
+    var t = a ^ a >>> 16; t = Math.imul(t, 0x21f0aaad);
+    t = t ^ t >>> 15; t = Math.imul(t, 0x735a2d97);
+    return ((t = t ^ t >>> 15) >>> 0) / 4294967296;
+  }
+}
+
+function xmur3(str)
+{
+  for(var i=0, h=1779033703 ^ str.length; i<str.length; i++)
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353), h = h << 13 | h >>> 19;
+  return function()
+  {
+    h = Math.imul(h ^ h >>> 16, 2246822507),
+    h = Math.imul(h ^ h >>> 13, 3266489909);
+    return (h ^= h >>> 16) >>> 0;
+  }
+}
 
 function loadTextFile(url)
 {
@@ -214,16 +238,16 @@ async function createPipelines()
 
 function render(time)
 {
-  if (audioContext === undefined && start === undefined) {
-    start = time;
-    lastUpdate = AUDIO ? audioContext.currentTime : time;
+  if (start === undefined) {
+    start = AUDIO ? (audioContext.currentTime * 1000.0) : time;
+    lastUpdate = start;
   }
 
-  const currTime = AUDIO ? audioContext.currentTime : (time - start); 
+  const currTime = AUDIO ? (audioContext.currentTime * 1000.0) : (time - start);
 
   const commandEncoder = device.createCommandEncoder();
 
-  if(!pause && currTime - lastUpdate > UPDATE_INTERVAL) {
+  if(!pause && (currTime - lastUpdate > UPDATE_INTERVAL)) {
     let count = Math.ceil(GRID_RES / 4);
 
     encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationSteps % 2], count, count, count);
@@ -338,8 +362,6 @@ function initGrid()
 
 function createGrid()
 {
-  // TOOD Set and log random seed
- 
   for(let i=0; i<initialGrid.length; i++)
     initialGrid[i] = 0;
 
@@ -350,7 +372,7 @@ function createGrid()
   for(let k=GRID_RES * 0.5 - SEED_AREA; k<GRID_RES * 0.5 + SEED_AREA; k++)
     for(let j=GRID_RES * 0.5 - SEED_AREA; j<GRID_RES * 0.5 + SEED_AREA; j++)
       for(let i=GRID_RES * 0.5 - SEED_AREA; i<GRID_RES * 0.5 + SEED_AREA; i++)
-        initialGrid[9 + GRID_RES * GRID_RES * k + GRID_RES * j + i] = Math.random() > 0.6 ? 1 : 0;
+        initialGrid[9 + GRID_RES * GRID_RES * k + GRID_RES * j + i] = rand() > 0.6 ? 1 : 0;
   
   initGrid();
 }   
@@ -358,7 +380,7 @@ function createGrid()
 function resetView()
 {
   eye = [GRID_RES, GRID_RES, GRID_RES];
-  eye = vec3Add(eye, vec3Scale(eye, 0.25));
+  eye = vec3Add(eye, vec3Scale(eye, 0.05));
   fwd = vec3Normalize(vec3Add([GRID_RES/2, GRID_RES/2, GRID_RES/2], vec3Negate(eye)));
 
   programmableValue = 0.0;
@@ -517,7 +539,7 @@ async function main()
   context = canvas.getContext("webgpu");
   context.configure({device, format: presentationFormat, alphaMode: "opaque"});
 
-  if (AUDIO) {
+  if (AUDIO || FULLSCREEN) {
     document.querySelector("button").addEventListener("click", startRender);
   } else {
     startRender();
