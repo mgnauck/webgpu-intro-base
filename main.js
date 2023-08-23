@@ -4,13 +4,14 @@ const AUDIO = false;
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 1024;
 const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
+const FOV = 50.0;
 
 const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
 
 const GRID_RES = 128.0;
 const SEED_AREA = 5;
-const UPDATE_INTERVAL = 400;
+const UPDATE_INTERVAL = 200;
 
 const MOVE_VELOCITY = 0.5;
 const LOOK_VELOCITY = 0.025;
@@ -38,7 +39,7 @@ let programmableValue;
 let start, lastUpdate;
 let simulationSteps = 0;
 let pause = false;
-let initialGrid = new Uint32Array(GRID_RES * GRID_RES * GRID_RES);
+let initialGrid = new Uint32Array(9 + GRID_RES * GRID_RES * GRID_RES);
 
 function loadTextFile(url)
 {
@@ -73,33 +74,22 @@ async function createRenderPipeline(shaderModule, pipelineLayout)
   });
 }
 
-function encodeComputePassAndSubmit(pipeline, bindGroup, workgroupCountX, workgroupCountY, workgroupCountZ, preSubmitOperation)
+function encodeComputePassAndSubmit(commandEncoder, pipeline, bindGroup, countX, countY, countZ)
 {
-  const commandEncoder = device.createCommandEncoder();
-
   const passEncoder = commandEncoder.beginComputePass();
   passEncoder.setPipeline(pipeline);
   passEncoder.setBindGroup(0, bindGroup);
-  passEncoder.dispatchWorkgroups(workgroupCountX, workgroupCountY, workgroupCountZ);
+  passEncoder.dispatchWorkgroups(countX, countY, countZ);
   passEncoder.end();
-
-  if (preSubmitOperation != undefined) {
-    preSubmitOperation(commandEncoder);
-  }
-
-  device.queue.submit([commandEncoder.finish()]);
 }
 
-function encodeRenderPassAndSubmit(passDescriptor, pipeline, bindGroup)
+function encodeRenderPassAndSubmit(commandEncoder, passDescriptor, pipeline, bindGroup)
 {
-  const commandEncoder = device.createCommandEncoder();
   const passEncoder = commandEncoder.beginRenderPass(passDescriptor);
   passEncoder.setPipeline(pipeline);
   passEncoder.setBindGroup(0, bindGroup);
   passEncoder.draw(4);
   passEncoder.end();
-
-  device.queue.submit([commandEncoder.finish()]);
 }
 
 async function prepareAudio()
@@ -136,20 +126,20 @@ async function prepareAudio()
     size: AUDIO_WIDTH * AUDIO_HEIGHT * 2 * 4
   });
 
-  setupPerformanceTimer("Render audio");
+  setupPerformanceTimer("Audio");
 
   let shaderModule = device.createShaderModule({code: await loadTextFile("audioShader.wgsl")});
   let pipelineLayout = device.createPipelineLayout({bindGroupLayouts: [bindGroupLayout]});
 
-  encodeComputePassAndSubmit(
-      await createComputePipeline(shaderModule, pipelineLayout),
-      bindGroup, Math.ceil(AUDIO_WIDTH / 8), Math.ceil(AUDIO_HEIGHT / 8), 1,
-      function(commandEncoder) {
-        commandEncoder.copyTextureToBuffer(
-            {texture: audioTexture},
-            {buffer: readBuffer, bytesPerRow: AUDIO_WIDTH * 2 * 4},
-            [AUDIO_WIDTH, AUDIO_HEIGHT]);
-      });
+  const commandEncoder = device.createCommandEncoder();
+  
+  encodeComputePassAndSubmit(commandEncoder, await createComputePipeline(shaderModule, pipelineLayout),
+      bindGroup, Math.ceil(AUDIO_WIDTH / 8), Math.ceil(AUDIO_HEIGHT / 8), 1);
+
+  commandEncoder.copyTextureToBuffer(
+    {texture: audioTexture}, {buffer: readBuffer, bytesPerRow: AUDIO_WIDTH * 2 * 4}, [AUDIO_WIDTH, AUDIO_HEIGHT]);
+
+  device.queue.submit([commandEncoder.finish()]);
 
   await readBuffer.mapAsync(GPUMapMode.READ);
   const audioData = new Float32Array(readBuffer.getMappedRange());
@@ -179,14 +169,14 @@ async function createGPUResources()
     ]
   });
  
-  // 4*vec3f, grid res, time, programmable value
+  // right, up, fwd, eye, fov, time, 2 x programmable value (= padding)
   uniformBuffer = device.createBuffer({
     size: 16 * 4,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
 
   for(let i=0; i<2; i++) {
     gridBuffer[i] = device.createBuffer({
-      size: GRID_RES * GRID_RES * GRID_RES * 4,
+      size: (9 + GRID_RES * GRID_RES * GRID_RES) * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
   }
 
@@ -231,9 +221,13 @@ function render(time)
 
   const currTime = AUDIO ? audioContext.currentTime : (time - start); 
 
+  const commandEncoder = device.createCommandEncoder();
+
   if(!pause && currTime - lastUpdate > UPDATE_INTERVAL) {
-    let workgroupCnt = Math.ceil(GRID_RES / 4);
-    encodeComputePassAndSubmit(computePipeline, bindGroup[simulationSteps % 2], workgroupCnt, workgroupCnt, workgroupCnt);
+    let count = Math.ceil(GRID_RES / 4);
+
+    encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationSteps % 2], count, count, count);
+
     simulationSteps++;
     lastUpdate += UPDATE_INTERVAL;
   }
@@ -244,19 +238,21 @@ function render(time)
 
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
     ...right,
-    GRID_RES,
+    0.5 / Math.tan(0.5 * FOV * Math.PI / 180.0),
     ...up,
-    50.0, // fov
-    ...fwd,
     currTime,
+    ...fwd,
+    programmableValue,
     ...eye,
-    programmableValue
+    1.0 // programmableValue2
   ]));
 
-  setupPerformanceTimer("Render");
+  setupPerformanceTimer();
 
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
-  encodeRenderPassAndSubmit(renderPassDescriptor, renderPipeline, bindGroup[simulationSteps % 2]);
+  encodeRenderPassAndSubmit(commandEncoder, renderPassDescriptor, renderPipeline, bindGroup[simulationSteps % 2]);
+  
+  device.queue.submit([commandEncoder.finish()]);
 
   requestAnimationFrame(render);
 }
@@ -342,13 +338,19 @@ function initGrid()
 
 function createGrid()
 {
+  // TOOD Set and log random seed
+ 
   for(let i=0; i<initialGrid.length; i++)
     initialGrid[i] = 0;
+
+  initialGrid[0] = 1;
+  initialGrid[1] = GRID_RES;
+  initialGrid[2] = GRID_RES * GRID_RES;
 
   for(let k=GRID_RES * 0.5 - SEED_AREA; k<GRID_RES * 0.5 + SEED_AREA; k++)
     for(let j=GRID_RES * 0.5 - SEED_AREA; j<GRID_RES * 0.5 + SEED_AREA; j++)
       for(let i=GRID_RES * 0.5 - SEED_AREA; i<GRID_RES * 0.5 + SEED_AREA; i++)
-        initialGrid[GRID_RES * GRID_RES * k + GRID_RES * j + i] = Math.random() > 0.6 ? 1 : 0;
+        initialGrid[9 + GRID_RES * GRID_RES * k + GRID_RES * j + i] = Math.random() > 0.6 ? 1 : 0;
   
   initGrid();
 }   
@@ -394,9 +396,11 @@ function handleKeyEvent(e)
       break;
     case "l":
       createPipelines();
+      console.log("Shader module reloaded");
       break;
     case "p":
       pause = !pause;
+      console.log("Simulation paused");
     break;
   };
 

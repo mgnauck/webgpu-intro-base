@@ -1,13 +1,29 @@
 struct Uniforms
 {
   right: vec3f,
-  gridRes: f32,
+  tanHalfFov: f32,
   up: vec3f,
-  verticalFovInDeg: f32,
-  forward: vec3f,
   time: f32,
+  forward: vec3f,
+  freeValue1: f32,
   eye: vec3f,
-  freeValue: f32
+  freeValue2: f32
+}
+
+struct Grid
+{
+  mul: vec3i,
+  // TODO Make atomic
+  min: vec3i,
+  max: vec3i,
+  arr: array<u32>
+}
+
+// TODO Use as binding 3
+struct Rules
+{
+  ilk: u32,
+  arr: array<u32>
 }
 
 const WIDTH = 800;
@@ -22,8 +38,8 @@ const rules = array<array<u32, 27>, 2>(
 );
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
-@group(0) @binding(1) var<storage> grid : array<u32>;
-@group(0) @binding(2) var<storage, read_write> outputGrid : array<u32>;
+@group(0) @binding(1) var<storage> grid: Grid;
+@group(0) @binding(2) var<storage, read_write> outputGrid: Grid;
 
 fn maxComp(v: vec3f) -> f32
 {
@@ -35,81 +51,90 @@ fn minComp(v: vec3f) -> f32
   return min(v.x, min(v.y, v.z));
 }
 
-fn getCell(x: i32, y: i32, z: i32, gridMul: ptr<function, vec3i>) -> u32
+fn getCell(x: i32, y: i32, z: i32) -> u32
 {
-  // Consider only states 0 and 1. Cells in refactory period do NOT count as active neighbours.
-  return 1 - min(abs(1 - grid[(*gridMul).z * z + (*gridMul).y * y + x]), 1);
+  // Consider only states 0 and 1. Cells in refactory period do NOT count as active neighbours, i.e. are counted as 0.
+  return 1 - min(abs(1 - grid.arr[grid.mul.z * z + grid.mul.y * y + x]), 1);
 }
 
-fn getNeumannNeighbourCountWrap(pos: vec3i, gridMul: ptr<function, vec3i>) -> u32
+fn getNeumannNeighbourCountWrap(pos: vec3i) -> u32
 {
-  let res = vec3i((*gridMul).y);
-  let dec = (pos - vec3i(1)) % res;
-  let inc = (pos + vec3i(1)) % res;
+  let res = grid.mul.y;
+  let dec = vec3i((pos.x - 1) % res, (pos.y - 1) % res, (pos.z - 1) % res);
+  let inc = vec3i((pos.x + 1) % res, (pos.y + 1) % res, (pos.z + 1) % res);
 
-  return  getCell(inc.x, pos.y, pos.z, gridMul) +
-          getCell(dec.x, pos.y, pos.z, gridMul) +
-          getCell(pos.x, inc.y, pos.z, gridMul) +
-          getCell(pos.x, dec.y, pos.z, gridMul) +
-          getCell(pos.x, pos.y, inc.z, gridMul) +
-          getCell(pos.x, pos.y, dec.z, gridMul);
+  return  getCell(inc.x, pos.y, pos.z) +
+          getCell(dec.x, pos.y, pos.z) +
+          getCell(pos.x, inc.y, pos.z) +
+          getCell(pos.x, dec.y, pos.z) +
+          getCell(pos.x, pos.y, inc.z) +
+          getCell(pos.x, pos.y, dec.z);
 }
 
-fn getMooreNeighbourCountWrap(pos: vec3i, gridMul: ptr<function, vec3i>) -> u32
+fn getMooreNeighbourCountWrap(pos: vec3i) -> u32
 {
-  let res = vec3i((*gridMul).y);
-  let dec = (pos - vec3i(1)) % res;
-  let inc = (pos + vec3i(1)) % res;
+  let res = grid.mul.y;
+  let dec = vec3i((pos.x - 1) % res, (pos.y - 1) % res, (pos.z - 1) % res);
+  let inc = vec3i((pos.x + 1) % res, (pos.y + 1) % res, (pos.z + 1) % res);
 
-  return  getCell(pos.x, inc.y, pos.z, gridMul) +
-          getCell(inc.x, inc.y, pos.z, gridMul) +
-          getCell(dec.x, inc.y, pos.z, gridMul) +
-          getCell(pos.x, inc.y, inc.z, gridMul) +
-          getCell(pos.x, inc.y, dec.z, gridMul) +
-          getCell(inc.x, inc.y, inc.z, gridMul) +
-          getCell(inc.x, inc.y, dec.z, gridMul) +
-          getCell(dec.x, inc.y, inc.z, gridMul) +
-          getCell(dec.x, inc.y, dec.z, gridMul) +
-          getCell(inc.x, pos.y, pos.z, gridMul) +
-          getCell(dec.x, pos.y, pos.z, gridMul) +
-          getCell(pos.x, pos.y, inc.z, gridMul) +
-          getCell(pos.x, pos.y, dec.z, gridMul) +
-          getCell(inc.x, pos.y, inc.z, gridMul) +
-          getCell(inc.x, pos.y, dec.z, gridMul) +
-          getCell(dec.x, pos.y, inc.z, gridMul) +
-          getCell(dec.x, pos.y, dec.z, gridMul) +
-          getCell(pos.x, dec.y, pos.z, gridMul) +
-          getCell(inc.x, dec.y, pos.z, gridMul) +
-          getCell(dec.x, dec.y, pos.z, gridMul) +
-          getCell(pos.x, dec.y, inc.z, gridMul) +
-          getCell(pos.x, dec.y, dec.z, gridMul) +
-          getCell(inc.x, dec.y, inc.z, gridMul) +
-          getCell(inc.x, dec.y, dec.z, gridMul) +
-          getCell(dec.x, dec.y, inc.z, gridMul) +
-          getCell(dec.x, dec.y, dec.z, gridMul);
+  return  getCell(pos.x, inc.y, pos.z) +
+          getCell(inc.x, inc.y, pos.z) +
+          getCell(dec.x, inc.y, pos.z) +
+          getCell(pos.x, inc.y, inc.z) +
+          getCell(pos.x, inc.y, dec.z) +
+          getCell(inc.x, inc.y, inc.z) +
+          getCell(inc.x, inc.y, dec.z) +
+          getCell(dec.x, inc.y, inc.z) +
+          getCell(dec.x, inc.y, dec.z) +
+          getCell(inc.x, pos.y, pos.z) +
+          getCell(dec.x, pos.y, pos.z) +
+          getCell(pos.x, pos.y, inc.z) +
+          getCell(pos.x, pos.y, dec.z) +
+          getCell(inc.x, pos.y, inc.z) +
+          getCell(inc.x, pos.y, dec.z) +
+          getCell(dec.x, pos.y, inc.z) +
+          getCell(dec.x, pos.y, dec.z) +
+          getCell(pos.x, dec.y, pos.z) +
+          getCell(inc.x, dec.y, pos.z) +
+          getCell(dec.x, dec.y, pos.z) +
+          getCell(pos.x, dec.y, inc.z) +
+          getCell(pos.x, dec.y, dec.z) +
+          getCell(inc.x, dec.y, inc.z) +
+          getCell(inc.x, dec.y, dec.z) +
+          getCell(dec.x, dec.y, inc.z) +
+          getCell(dec.x, dec.y, dec.z);
 }
 
-fn evalMultiState(pos: vec3i, states: u32, gridMul: ptr<function, vec3i>)
+fn evalMultiState(pos: vec3i, states: u32)
 {
-  let index = dot(pos, *gridMul);
-  let value = grid[index];
+  let index = dot(pos, grid.mul);
+  let value = grid.arr[index];
 
-  if(value <= 1) {
-    let count = getMooreNeighbourCountWrap(pos, gridMul);
-    outputGrid[index] = u32(abs(i32(value + value) - i32(rules[value][count])));
-  } else { 
-    outputGrid[index] = (value + 1) % states;
+  switch(value) {
+    case 0: {
+      let newValue = rules[0][getMooreNeighbourCountWrap(pos)];
+      outputGrid.arr[index] = newValue;
+      if(newValue == 1) {
+        // TODO make atomic
+        outputGrid.min = min(outputGrid.min, pos - vec3i(1));
+        outputGrid.max = max(outputGrid.max, pos + vec3i(1));
+      }
+    }
+    case 1: {
+      // Dying state 1 goes to 2
+      outputGrid.arr[index] = 1 + 1 - rules[1][getMooreNeighbourCountWrap(pos)];
+    }
+    default {
+      // Refactory period
+      outputGrid.arr[index] = (value + 1) % states;
+    }
   }
 }
 
 @compute @workgroup_size(4,4,4)
 fn c(@builtin(global_invocation_id) globalId: vec3u)
 {
-  let currPos = vec3i(globalId);
-  let gridRes = i32(uniforms.gridRes);
-  var gridMul = vec3i(1, gridRes, gridRes * gridRes);
- 
-  evalMultiState(currPos, 5, &gridMul);
+  evalMultiState(vec3i(globalId), 5);
 }
 
 fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, invDir: vec3f, tmin: ptr<function, f32>, tmax: ptr<function, f32>) -> bool
@@ -123,31 +148,35 @@ fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, invDir: vec3f, tmin: 
   return *tmin <= *tmax && *tmax > 0.0;
 }
 
-fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, gridRes: f32, dist: ptr<function, f32>, norm: ptr<function, vec3f>) -> bool
+fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, dist: ptr<function, f32>, norm: ptr<function, vec3f>) -> u32
 {
-  let gridMul = vec3f(1.0, gridRes, gridRes * gridRes);
   let stepDir = sign(invDir);
   var cell = floor(ori);
   var t = (vec3f(0.5) + 0.5 * stepDir - fract(ori)) * invDir;
+  
+  var mask : vec3f;
+  let gridMul = vec3f(grid.mul);
 
   while(*dist < tmax) {
-    let mask = vec3f(f32(t.x <= t.y && t.x <= t.z), f32(t.y <= t.x && t.y <= t.z), f32(t.z <= t.x && t.z <= t.y));
+    mask.x = f32(t.x <= t.y && t.x <= t.z);
+    mask.y = f32(t.y <= t.x && t.y <= t.z);
+    mask.z = f32(t.z <= t.x && t.z <= t.y);
  
     t += mask * stepDir * invDir;
     cell += mask * stepDir;
 
     *dist = dot(mask, (vec3f(0.5) - 0.5 * stepDir + cell - ori) * invDir);
-
-    if(grid[u32(dot(gridMul, cell))] > 0) {
+    let state = grid.arr[u32(dot(gridMul, cell))];
+    if(state > 0) {
       *norm = -mask * stepDir;
-      return true;
+      return state;
     }
   }
 
-  return false;
+  return 0;
 }
 
-fn shade(pos: vec3f, dir: vec3f, norm: vec3f, dist: f32) -> vec3f
+fn shade(pos: vec3f, dir: vec3f, norm: vec3f, dist: f32, state: u32) -> vec3f
 {
   let border = vec3f(0.5 - 0.05);
   let wire = (vec3f(1) - abs(norm)) * abs(fract(pos) - vec3f(0.5));
@@ -157,16 +186,11 @@ fn shade(pos: vec3f, dir: vec3f, norm: vec3f, dist: f32) -> vec3f
   }
 
   // TODO Fake AO
-  // TODO Consider state in shading
   // TODO Consider distance to center in shading
 
-  var sky = (0.4 + norm.y * 0.6);
-  return pos / uniforms.gridRes * sky * exp(4 * -dist);
-}
-
-fn renderBackground(o: vec3f, d: vec3f) -> vec3f
-{
-  return HEMISPHERE * 0.001;
+  let val = 5.0 / f32(state);
+  let sky = (0.4 + norm.y * 0.6);
+  return pos / f32(grid.mul.y) * sky * val * exp(4 * -dist);
 }
 
 @vertex
@@ -179,21 +203,24 @@ fn v(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f
 @fragment
 fn f(@builtin(position) position: vec4f) -> @location(0) vec4f
 {
+  // Framebuffer y-down in webgpu
   let origin = uniforms.eye;
-  let dirEyeSpace = vec3f((position.xy - vec2f(WIDTH, HEIGHT) * 0.5) / f32(HEIGHT), 0.5 / tan(radians(0.5 * uniforms.verticalFovInDeg)));
+  let dirEyeSpace = normalize(vec3f((position.xy - vec2f(WIDTH, HEIGHT) * 0.5) / f32(HEIGHT), uniforms.tanHalfFov));
   let dir = uniforms.right * dirEyeSpace.x - uniforms.up * dirEyeSpace.y + uniforms.forward * dirEyeSpace.z;
 
+  var col = HEMISPHERE * 0.005;
+
   let invDir = 1.0 / dir; 
-  var col = renderBackground(origin, dir);
   var tmin: f32;
   var tmax: f32;
   var t: f32;
   var norm: vec3f;
 
-  if(intersectAabb(vec3f(0), vec3f(uniforms.gridRes), origin, invDir, &tmin, &tmax)) {
+  if(intersectAabb(vec3f(0), vec3f(f32(grid.mul.y)), origin, invDir, &tmin, &tmax)) {
     tmin = max(tmin - EPSILON, -EPSILON);
-    if(traverseGrid(origin + tmin * dir, invDir, tmax - tmin, uniforms.gridRes, &t, &norm)) {
-      col = shade(origin + (tmin + t) * dir, dir, norm, (tmin + t) / tmax);
+    let state = traverseGrid(origin + tmin * dir, invDir, tmax - tmin, &t, &norm);
+    if(state > 0) {
+      col = shade(origin + (tmin + t) * dir, dir, norm, (tmin + t) / tmax, state);
     }
   }
 
