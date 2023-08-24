@@ -44,9 +44,7 @@ struct Rules
 
 const WIDTH = 800;
 const HEIGHT = WIDTH / 1.6;
-
 const EPSILON = 0.001;
-const HEMISPHERE = vec3f(0.3, 0.3, 0.6);
 
 const rules = array<array<u32, 27>, 2>(
   array<u32, 27>(0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // birth
@@ -182,20 +180,24 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, dist: ptr<function, f32>, 
   var mask : vec3f;
   let gridMul = vec3f(grid.mul);
 
+  *dist = minComp(t);
+  
   while(*dist < tmax) {
     mask.x = f32(t.x <= t.y && t.x <= t.z);
     mask.y = f32(t.y <= t.x && t.y <= t.z);
     mask.z = f32(t.z <= t.x && t.z <= t.y);
- 
+
     t += mask * stepDir * invDir;
+    // TODO use offset (via gridMul instead of cellxyz)
     cell += mask * stepDir;
 
-    *dist = dot(mask, (vec3f(0.5) - 0.5 * stepDir + cell - ori) * invDir);
     let state = grid.arr[u32(dot(gridMul, cell))];
     if(state > 0) {
       *norm = -mask * stepDir;
       return state;
     }
+    
+    *dist = minComp(t);
   }
 
   return 0;
@@ -233,8 +235,7 @@ fn f(@builtin(position) position: vec4f) -> @location(0) vec4f
   let dirEyeSpace = normalize(vec3f((position.xy - vec2f(WIDTH, HEIGHT) * 0.5) / f32(HEIGHT), uniforms.tanHalfFov));
   let dir = uniforms.right * dirEyeSpace.x - uniforms.up * dirEyeSpace.y + uniforms.forward * dirEyeSpace.z;
 
-  var col = HEMISPHERE * 0.005;
-
+  var col = vec3f(0.3, 0.3, 0.6) * 0.005;
   let invDir = 1.0 / dir; 
   var tmin: f32;
   var tmax: f32;
