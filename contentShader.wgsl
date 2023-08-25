@@ -14,9 +14,9 @@ struct Grid
 {
   mul: vec3i,
   pad1: i32,
-  min: vec3u,
+  minc: vec3u,
   pad2: u32,
-  max: vec3u,
+  maxc: vec3u,
   arr: array<u32>
 }
 
@@ -34,10 +34,10 @@ struct OutputGrid
   arr: array<u32>
 }
 
-// TODO Use as binding 3
 struct Rules
 {
-  ilk: u32,
+  kind: u32,
+  states: u32,
   arr: array<u32>
 }
 
@@ -45,14 +45,10 @@ const WIDTH = 1024;
 const HEIGHT = WIDTH / 1.6;
 const EPSILON = 0.001;
 
-const rules = array<array<u32, 27>, 2>(
-  array<u32, 27>(0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // birth
-  array<u32, 27>(0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)  // live
-);
-
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(0) @binding(1) var<storage> grid: Grid;
 @group(0) @binding(2) var<storage, read_write> outputGrid: OutputGrid;
+@group(0) @binding(3) var<storage> rules: Rules;
 
 fn maxComp(v: vec3f) -> f32
 {
@@ -125,7 +121,7 @@ fn evalMultiState(pos: vec3i, states: u32)
 
   switch(value) {
     case 0: {
-      let newValue = rules[0][getMooreNeighbourCountWrap(pos)];
+      let newValue = rules.arr[getMooreNeighbourCountWrap(pos)];
       outputGrid.arr[index] = newValue;
       if(newValue == 1) {
         let s = grid.mul.y - 1;
@@ -139,11 +135,11 @@ fn evalMultiState(pos: vec3i, states: u32)
     }
     case 1: {
       // Dying state 1 goes to 2
-      outputGrid.arr[index] = 1 + 1 - rules[1][getMooreNeighbourCountWrap(pos)];
+      outputGrid.arr[index] = 1 + 1 - rules.arr[27 + getMooreNeighbourCountWrap(pos)];
     }
     default {
       // Refactory period
-      outputGrid.arr[index] = (value + 1) % states;
+      outputGrid.arr[index] = (value + 1) % rules.states;
     }
   }
 }
@@ -151,9 +147,16 @@ fn evalMultiState(pos: vec3i, states: u32)
 @compute @workgroup_size(4,4,4)
 fn c(@builtin(global_invocation_id) globalId: vec3u)
 {
-  let halfExtent = vec3f(grid.max - grid.min) * 0.5;
-  if(maxComp(abs(vec3f(globalId - grid.min) - halfExtent) / halfExtent) <= 1.0) {
-    evalMultiState(vec3i(globalId), 5);
+  let halfExtent = vec3f(grid.maxc - grid.minc) * 0.5;
+  if(maxComp(abs(vec3f(globalId - grid.minc) - halfExtent) / halfExtent) <= 1.0) {
+    switch(rules.kind) {
+      case 1: {
+        // TODO handle different automaton
+      }
+      default: {
+        evalMultiState(vec3i(globalId), rules.states);
+      }
+    }
   }
 }
 
@@ -237,16 +240,16 @@ fn f(@builtin(position) position: vec4f) -> @location(0) vec4f
   var t: f32;
   var norm: vec3f;
 
-  if(intersectAabb(vec3f(grid.min), vec3f(grid.max), origin, invDir, &tmin, &tmax)) {
+  if(intersectAabb(vec3f(grid.minc), vec3f(grid.maxc), origin, invDir, &tmin, &tmax)) {
     tmin = max(tmin - EPSILON, -EPSILON);
     let state = traverseGrid(origin + tmin * dir, invDir, tmax - tmin, &t, &norm);
     if(state > 0) {
       col = shade(origin + (tmin + t) * dir, dir, norm, (tmin + t) / tmax, state);
-    } /*else
+    } else
     {
       // Visualize grid box
       col = vec3f(0.005);
-    }*/
+    }
   }
 
   return vec4f(pow(col, vec3f(0.4545)), 1.0);

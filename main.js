@@ -10,9 +10,8 @@ const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
 
 const GRID_RES = 128;
-const META_OFS = 11;
+const GRID_OFS = 11;
 const SEED_AREA = 5;
-const UPDATE_INTERVAL = 150;
 
 const MOVE_VELOCITY = 0.5;
 const LOOK_VELOCITY = 0.025;
@@ -22,9 +21,9 @@ let audioContext;
 let audioBufferSourceNode;
 
 let device;
-
 let uniformBuffer;
 let gridBuffer = [];
+let rulesBuffer;
 let bindGroup = [];
 let pipelineLayout;
 let computePipeline;
@@ -37,10 +36,13 @@ let context;
 let right, up, fwd, eye;
 let programmableValue;
 
+let grid;
+let rules;
+
 let start, lastUpdate;
 let simulationSteps = 0;
-let pause = false;
-let initialGrid = new Uint32Array(META_OFS + GRID_RES * GRID_RES * GRID_RES);
+let updateDelay = 150;
+let paused = false;
 
 let rand = splitmix32(xmur3("unik"));
 
@@ -191,6 +193,7 @@ async function createGPUResources()
       {binding: 0, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: {type: "uniform"}},
       {binding: 1, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: {type: "read-only-storage"}},
       {binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: {type: "storage"}},
+      {binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: {type: "read-only-storage"}},
     ]
   });
  
@@ -201,9 +204,11 @@ async function createGPUResources()
 
   for(let i=0; i<2; i++) {
     gridBuffer[i] = device.createBuffer({
-      size: initialGrid.length * 4,
+      size: grid.length * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
   }
+
+  rulesBuffer = device.createBuffer({size: rules.length * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   for(let i=0; i<2; i++) {
     bindGroup[i] = device.createBindGroup({
@@ -211,7 +216,8 @@ async function createGPUResources()
       entries: [
         {binding: 0, resource: {buffer: uniformBuffer}},
         {binding: 1, resource: {buffer: gridBuffer[i]}},
-        {binding: 2, resource: {buffer: gridBuffer[1 - i]}}
+        {binding: 2, resource: {buffer: gridBuffer[1 - i]}},
+        {binding: 3, resource: {buffer: rulesBuffer}},
       ]
     });
   }
@@ -247,16 +253,14 @@ function render(time)
   const currTime = AUDIO ? (audioContext.currentTime * 1000.0) : (time - start);
   const commandEncoder = device.createCommandEncoder();
 
-  if(!pause && (currTime - lastUpdate > UPDATE_INTERVAL)) {
+  if(paused)
+    lastUpdate = currTime;
+  else if(currTime - lastUpdate > updateDelay) {
     const count = Math.ceil(GRID_RES / 4);
-    device.queue.writeBuffer(gridBuffer[1 - simulationSteps % 2], 16, initialGrid, 16, 28);
+    device.queue.writeBuffer(gridBuffer[1 - simulationSteps % 2], 16, grid, 16, 28);
     encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationSteps % 2], count, count, count);
     simulationSteps++;
-    lastUpdate += UPDATE_INTERVAL;
-  }
-
-  if(pause) {
-    lastUpdate = currTime;
+    lastUpdate += updateDelay;
   }
 
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
@@ -353,37 +357,62 @@ function axisRotation(axis, angle)
           0, 0, 0, 1]
 }
 
-function initGrid()
+function copyGrid()
 { 
-  device.queue.writeBuffer(gridBuffer[0], 0, initialGrid);
-  device.queue.writeBuffer(gridBuffer[1], 0, initialGrid); 
+  device.queue.writeBuffer(gridBuffer[0], 0, grid);
+  device.queue.writeBuffer(gridBuffer[1], 0, grid); 
 }
 
-function createGrid()
+function initGrid()
 {
-  initialGrid[0] = 1;
-  initialGrid[1] = GRID_RES;
-  initialGrid[2] = GRID_RES * GRID_RES;
-  initialGrid[3] = 0.0; // padding
+  grid = new Uint32Array(GRID_OFS + GRID_RES * GRID_RES * GRID_RES);
+
+  grid[0] = 1;
+  grid[1] = GRID_RES;
+  grid[2] = GRID_RES * GRID_RES;
+  grid[3] = 0.0; // padding
 
   let min = GRID_RES / 2 - SEED_AREA;
-  initialGrid[4] = min - 1;
-  initialGrid[5] = min - 1;
-  initialGrid[6] = min - 1; 
-  initialGrid[7] = 0.0; // padding
+  grid[4] = min - 1;
+  grid[5] = min - 1;
+  grid[6] = min - 1; 
+  grid[7] = 0.0; // padding
 
   let max = GRID_RES / 2 + SEED_AREA;
-  initialGrid[8] = max + 1;
-  initialGrid[9] = max + 1;
-  initialGrid[10] = max + 1;
+  grid[8] = max + 1;
+  grid[9] = max + 1;
+  grid[10] = max + 1;
 
   for(let k=min; k<max; k++)
     for(let j=min; j<max; j++)
       for(let i=min; i<max; i++)
-        initialGrid[META_OFS + GRID_RES * GRID_RES * k + GRID_RES * j + i] = rand() > 0.6 ? 1 : 0;
-  
-  initGrid();
-}   
+        grid[GRID_OFS + GRID_RES * GRID_RES * k + GRID_RES * j + i] = rand() > 0.6 ? 1 : 0;
+}
+
+function copyRules()
+{
+  device.queue.writeBuffer(rulesBuffer, 0, rules);
+}
+
+function initRules()
+{
+  rules = new Uint32Array(2 + 2 * 27);
+
+  rules[0] = 0; // automaton kind
+  rules[1] = 5; // states
+
+  for(let i=0; i<2 * 27; i++)
+    rules[2 + i] = 0;
+
+  rules[2 + 4] = 1;
+  rules[2 + 27 + 4] = 1;
+}
+
+function randomizeRules()
+{
+  for(let i=0; i<2 * 27; i++)
+    rules[2 + i] = rand() > 0.8 ? 0 : 1;
+}
 
 function resetView()
 {
@@ -418,19 +447,30 @@ function handleKeyEvent(e)
     case "r":
       resetView();
       break;
-    case "i":
-      initGrid()
+   case "i":
+      initGrid();
       break;
-    case "n":
-      createGrid();
+    case "k":
+      copyGrid()
+      console.log("Copied grid");
+      break;
+    case "o":
+      initRules();
       break;
     case "l":
+      copyRules();
+      console.log("Copied rules");
+      break;
+    case "#":
+      randomizeRules();
+      console.log("Randomized rules");
+      break;
+    case "p":
       createPipelines();
       console.log("Shader module reloaded");
       break;
-    case "p":
-      pause = !pause;
-      console.log("Simulation paused");
+    case " ":
+      paused = !paused;
     break;
   };
 
@@ -481,7 +521,8 @@ function startRender()
 
   resetView();
   computeView();
-  createGrid();
+  copyGrid();
+  copyRules();
 
   document.querySelector("button").removeEventListener("click", startRender);
 
@@ -531,6 +572,9 @@ async function main()
   if (AUDIO) {
     await prepareAudio();
   }
+
+  initGrid();
+  initRules();
 
   await createGPUResources();
   await createPipelines();
