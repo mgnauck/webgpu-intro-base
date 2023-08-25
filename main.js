@@ -2,16 +2,17 @@ const FULLSCREEN = false;
 const AUDIO = false;
 
 const ASPECT = 1.6;
-const CANVAS_WIDTH = 800;
+const CANVAS_WIDTH = 1024;
 const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 const FOV = 50.0;
 
 const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
 
-const GRID_RES = 128.0;
+const GRID_RES = 128;
+const META_OFS = 11;
 const SEED_AREA = 5;
-const UPDATE_INTERVAL = 150.0;
+const UPDATE_INTERVAL = 150;
 
 const MOVE_VELOCITY = 0.5;
 const LOOK_VELOCITY = 0.025;
@@ -39,7 +40,7 @@ let programmableValue;
 let start, lastUpdate;
 let simulationSteps = 0;
 let pause = false;
-let initialGrid = new Uint32Array(9 + GRID_RES * GRID_RES * GRID_RES);
+let initialGrid = new Uint32Array(META_OFS + GRID_RES * GRID_RES * GRID_RES);
 
 let rand = splitmix32(xmur3("unik"));
 
@@ -200,7 +201,7 @@ async function createGPUResources()
 
   for(let i=0; i<2; i++) {
     gridBuffer[i] = device.createBuffer({
-      size: (9 + GRID_RES * GRID_RES * GRID_RES) * 4,
+      size: initialGrid.length * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
   }
 
@@ -248,8 +249,7 @@ function render(time)
 
   if(!pause && (currTime - lastUpdate > UPDATE_INTERVAL)) {
     const count = Math.ceil(GRID_RES / 4);
-    // Reset grid min/max of output buffer
-    device.queue.writeBuffer(gridBuffer[1 - simulationSteps % 2], 12, initialGrid, 12, 24);
+    device.queue.writeBuffer(gridBuffer[1 - simulationSteps % 2], 16, initialGrid, 16, 28);
     encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationSteps % 2], count, count, count);
     simulationSteps++;
     lastUpdate += UPDATE_INTERVAL;
@@ -361,25 +361,26 @@ function initGrid()
 
 function createGrid()
 {
-  // Grid multiplier
   initialGrid[0] = 1;
   initialGrid[1] = GRID_RES;
   initialGrid[2] = GRID_RES * GRID_RES;
+  initialGrid[3] = 0.0; // padding
 
   let min = GRID_RES / 2 - SEED_AREA;
-  initialGrid[3] = min - 1;
   initialGrid[4] = min - 1;
   initialGrid[5] = min - 1;
-  
+  initialGrid[6] = min - 1; 
+  initialGrid[7] = 0.0; // padding
+
   let max = GRID_RES / 2 + SEED_AREA;
-  initialGrid[6] = max + 1;
-  initialGrid[7] = max + 1;
   initialGrid[8] = max + 1;
+  initialGrid[9] = max + 1;
+  initialGrid[10] = max + 1;
 
   for(let k=min; k<max; k++)
     for(let j=min; j<max; j++)
       for(let i=min; i<max; i++)
-        initialGrid[9 + GRID_RES * GRID_RES * k + GRID_RES * j + i] = rand() > 0.6 ? 1 : 0;
+        initialGrid[META_OFS + GRID_RES * GRID_RES * k + GRID_RES * j + i] = rand() > 0.6 ? 1 : 0;
   
   initGrid();
 }   

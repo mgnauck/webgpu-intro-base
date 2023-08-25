@@ -13,22 +13,21 @@ struct Uniforms
 struct Grid
 {
   mul: vec3i,
-  minx: u32,
-  miny: u32,
-  minz: u32,
-  maxx: u32,
-  maxy: u32,
-  maxz: u32,
+  pad1: i32,
+  min: vec3u,
+  pad2: u32,
+  max: vec3u,
   arr: array<u32>
 }
 
 struct OutputGrid
 {
   mul: vec3i,
-  // TODO Add proper padding so we can use vec3f in Grid struct
+  pad1: i32,
   minx: atomic<u32>,
   miny: atomic<u32>,
   minz: atomic<u32>,
+  pad2: u32,
   maxx: atomic<u32>,
   maxy: atomic<u32>,
   maxz: atomic<u32>,
@@ -42,7 +41,7 @@ struct Rules
   arr: array<u32>
 }
 
-const WIDTH = 800;
+const WIDTH = 1024;
 const HEIGHT = WIDTH / 1.6;
 const EPSILON = 0.001;
 
@@ -152,10 +151,8 @@ fn evalMultiState(pos: vec3i, states: u32)
 @compute @workgroup_size(4,4,4)
 fn c(@builtin(global_invocation_id) globalId: vec3u)
 {
-  let gridMin = vec3f(f32(grid.minx), f32(grid.miny), f32(grid.minz));
-  let gridMax = vec3f(f32(grid.maxx), f32(grid.maxy), f32(grid.maxz));
-  let halfExtent = (gridMax - gridMin) * 0.5;
-  if(maxComp(abs(vec3f(globalId) - (gridMin + halfExtent)) / halfExtent) <= 1.0) {
+  let halfExtent = vec3f(grid.max - grid.min) * 0.5;
+  if(maxComp(abs(vec3f(globalId - grid.min) - halfExtent) / halfExtent) <= 1.0) {
     evalMultiState(vec3i(globalId), 5);
   }
 }
@@ -173,12 +170,11 @@ fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, invDir: vec3f, tmin: 
 
 fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, dist: ptr<function, f32>, norm: ptr<function, vec3f>) -> u32
 {
-  let stepDir = sign(invDir);
-  var cell = floor(ori);
-  var t = (vec3f(0.5) + 0.5 * stepDir - fract(ori)) * invDir;
-  
-  var mask : vec3f;
   let gridMul = vec3f(grid.mul);
+  let stepDir = sign(invDir);
+  var t = (vec3f(0.5) + 0.5 * stepDir - fract(ori)) * invDir;
+  var index = dot(gridMul, floor(ori));
+  var mask: vec3f;
 
   *dist = minComp(t);
   
@@ -188,10 +184,9 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, dist: ptr<function, f32>, 
     mask.z = f32(t.z <= t.x && t.z <= t.y);
 
     t += mask * stepDir * invDir;
-    // TODO use offset (via gridMul instead of cellxyz)
-    cell += mask * stepDir;
+    index += dot(gridMul, mask * stepDir);
 
-    let state = grid.arr[u32(dot(gridMul, cell))];
+    let state = grid.arr[u32(index)];
     if(state > 0) {
       *norm = -mask * stepDir;
       return state;
@@ -236,13 +231,13 @@ fn f(@builtin(position) position: vec4f) -> @location(0) vec4f
   let dir = uniforms.right * dirEyeSpace.x - uniforms.up * dirEyeSpace.y + uniforms.forward * dirEyeSpace.z;
 
   var col = vec3f(0.3, 0.3, 0.6) * 0.005;
-  let invDir = 1.0 / dir; 
+  let invDir = 1.0 / dir;
   var tmin: f32;
   var tmax: f32;
   var t: f32;
   var norm: vec3f;
 
-  if(intersectAabb(vec3f(f32(grid.minx), f32(grid.miny), f32(grid.minz)), vec3f(f32(grid.maxx), f32(grid.maxy), f32(grid.maxz)), origin, invDir, &tmin, &tmax)) {
+  if(intersectAabb(vec3f(grid.min), vec3f(grid.max), origin, invDir, &tmin, &tmax)) {
     tmin = max(tmin - EPSILON, -EPSILON);
     let state = traverseGrid(origin + tmin * dir, invDir, tmax - tmin, &t, &norm);
     if(state > 0) {
@@ -250,7 +245,7 @@ fn f(@builtin(position) position: vec4f) -> @location(0) vec4f
     } /*else
     {
       // Visualize grid box
-      col = vec3f(0.1);
+      col = vec3f(0.005);
     }*/
   }
 
