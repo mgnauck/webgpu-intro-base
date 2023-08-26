@@ -211,11 +211,18 @@ fn shade(pos: vec3f, dir: vec3f, norm: vec3f, dist: f32, state: u32) -> vec3f
   }
 
   // TODO Fake AO
-  // TODO Consider distance to center in shading
 
   let val = 5.0 / f32(state);
   let sky = (0.4 + norm.y * 0.6);
-  return pos / f32(grid.mul.y) * sky * val * exp(4 * -dist);
+  
+  // Position in cube and z-distance
+  //return pos / f32(grid.mul.y) * sky * val * exp(4 * -dist);
+
+  // Distance from center
+  let halfGrid = f32(grid.mul.y) * 0.5;
+  let v = pos - vec3f(halfGrid);
+  let centerDist = halfGrid * halfGrid / dot(v, v);
+  return vec3f(0.3, 0.3, 0.6) * vec3f(sky * val / centerDist);
 }
 
 @vertex
