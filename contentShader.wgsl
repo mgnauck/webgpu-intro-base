@@ -44,6 +44,8 @@ struct Rules
 const WIDTH = 1024;
 const HEIGHT = WIDTH / 1.6;
 const EPSILON = 0.001;
+const PI = 3.141;
+const TWO_PI = PI * 2.0;
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(0) @binding(1) var<storage> grid: Grid;
@@ -201,28 +203,43 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, dist: ptr<function, f32>, 
   return 0;
 }
 
+// IQ/rgba
+fn palette(t: f32, a: vec3f, b: vec3f, c: vec3f, d: vec3f) -> vec3f
+{
+  return a + b * cos(TWO_PI * (c * t + d));
+}
+
 fn shade(pos: vec3f, dir: vec3f, norm: vec3f, dist: f32, state: u32) -> vec3f
 {
-  let border = vec3f(0.5 - 0.05);
+  // Wireframe
+  /*let border = vec3f(0.5 - 0.05);
   let wire = (vec3f(1) - abs(norm)) * abs(fract(pos) - vec3f(0.5));
 
   if(any(vec3<bool>(step(border, wire)))) {
     return vec3f(0);
-  }
+  }*/
 
-  // TODO Fake AO
-
-  let val = 5.0 / f32(state);
-  let sky = (0.4 + norm.y * 0.6);
+  //let val = f32(rules.states) / f32(state);
   
-  // Position in cube and z-distance
+  // Position in cube and z-distance with sky and state
+  //let sky = (0.4 + norm.y * 0.6);
   //return pos / f32(grid.mul.y) * sky * val * exp(4 * -dist);
 
-  // Distance from center
-  let halfGrid = f32(grid.mul.y) * 0.5;
-  let v = pos - vec3f(halfGrid);
-  let centerDist = halfGrid * halfGrid / dot(v, v);
-  return vec3f(0.3, 0.3, 0.6) * vec3f(sky * val / centerDist);
+  // Center dist based
+  //let halfGrid = f32(grid.mul.y) * 0.5;
+  //let v = pos - vec3f(halfGrid);
+  //let centerDist = length(v) / halfGrid;
+  // Distance from center with sky and state
+  //return vec3f(0.3, 0.3, 0.6) * vec3f(sky * val / centerDist);
+  // Distance from center into palette scaled by state and dist
+  //return palette(centerDist, vec3f(0.3), vec3f(0.2), vec3f(0.6, 0.3, 0.3), vec3f(0.3, 0.5, 0.3)) * val * exp(3.5 * -dist);
+
+
+  // Fake AO
+  let uv = fract(pos);
+  var occlusion = 1.0;
+
+  return vec3f(0.5) * occlusion;
 }
 
 @vertex
@@ -248,15 +265,15 @@ fn f(@builtin(position) position: vec4f) -> @location(0) vec4f
   var norm: vec3f;
 
   if(intersectAabb(vec3f(grid.minc), vec3f(grid.maxc), origin, invDir, &tmin, &tmax)) {
-    tmin = max(tmin - EPSILON, -EPSILON);
-    let state = traverseGrid(origin + tmin * dir, invDir, tmax - tmin, &t, &norm);
+    tmin = max(-EPSILON, tmin - EPSILON);
+    let state = traverseGrid(origin + tmin * dir, invDir, tmax - tmin - EPSILON, &t, &norm);
     if(state > 0) {
       col = shade(origin + (tmin + t) * dir, dir, norm, (tmin + t) / tmax, state);
-    } else
+    } /*else
     {
       // Visualize grid box
       col = vec3f(0.005);
-    }
+    }*/
   }
 
   return vec4f(pow(col, vec3f(0.4545)), 1.0);
