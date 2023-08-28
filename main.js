@@ -41,7 +41,7 @@ let rules;
 
 let start, lastUpdate;
 let simulationSteps = 0;
-let updateDelay = 150;
+let updateDelay = 250;
 let paused = false;
 
 let rand = splitmix32(xmur3("unik"));

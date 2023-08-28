@@ -41,6 +41,15 @@ struct Rules
   arr: array<u32>
 }
 
+struct Result
+{
+  index: i32,
+  norm: vec3f,
+  state: u32,
+  dist: f32,
+  distNorm: f32
+}
+
 const WIDTH = 1024;
 const HEIGHT = WIDTH / 1.6;
 const EPSILON = 0.001;
@@ -173,73 +182,99 @@ fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, invDir: vec3f, tmin: 
   return *tmin <= *tmax && *tmax > 0.0;
 }
 
-fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, dist: ptr<function, f32>, norm: ptr<function, vec3f>) -> u32
+fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, res: ptr<function, Result>) -> bool
 {
   let gridMul = vec3f(grid.mul);
   let stepDir = sign(invDir);
   var t = (vec3f(0.5) + 0.5 * stepDir - fract(ori)) * invDir;
-  var index = dot(gridMul, floor(ori));
   var mask: vec3f;
 
-  *dist = minComp(t);
+  (*res).index = i32(dot(gridMul, floor(ori)));
   
-  while(*dist < tmax) {
+  loop {
+    (*res).dist = minComp(t);
+    if((*res).dist >= tmax) {
+      return false;
+    }
+ 
     mask.x = f32(t.x <= t.y && t.x <= t.z);
     mask.y = f32(t.y <= t.x && t.y <= t.z);
     mask.z = f32(t.z <= t.x && t.z <= t.y);
 
     t += mask * stepDir * invDir;
-    index += dot(gridMul, mask * stepDir);
-
-    let state = grid.arr[u32(index)];
-    if(state > 0) {
-      *norm = -mask * stepDir;
-      return state;
+    (*res).index += i32(dot(gridMul, mask * stepDir));
+ 
+    (*res).state = grid.arr[(*res).index];
+    if((*res).state > 0) {
+      (*res).norm = mask * -stepDir;
+      return true;
     }
-    
-    *dist = minComp(t);
   }
-
-  return 0;
 }
 
-// IQ/rgba
+// iq/rgba
 fn palette(t: f32, a: vec3f, b: vec3f, c: vec3f, d: vec3f) -> vec3f
 {
   return a + b * cos(TWO_PI * (c * t + d));
 }
 
-fn shade(pos: vec3f, dir: vec3f, norm: vec3f, dist: f32, state: u32) -> vec3f
+fn shade(pos: vec3f, dir: vec3f, res: ptr<function, Result>) -> vec3f
 {
-  // Wireframe
-  /*let border = vec3f(0.5 - 0.05);
-  let wire = (vec3f(1) - abs(norm)) * abs(fract(pos) - vec3f(0.5));
+  /*
+  // Wireframe, better add AA
+  let border = vec3f(0.5 - 0.02);
+  let wire = (vec3f(1) - abs((*res).norm)) * abs(fract(pos) - vec3f(0.5));
 
   if(any(vec3<bool>(step(border, wire)))) {
     return vec3f(0);
-  }*/
+  }
+  */
 
-  //let val = f32(rules.states) / f32(state);
-  
+  let val = f32(rules.states) / f32((*res).state);  
+
   // Position in cube and z-distance with sky and state
-  //let sky = (0.4 + norm.y * 0.6);
-  //return pos / f32(grid.mul.y) * sky * val * exp(4 * -dist);
+  let sky = (0.4 + (*res).norm.y * 0.6);
+  let col = pos / f32(grid.mul.y) * val * val * 0.33 * sky * exp(-4 * (*res).distNorm);
 
-  // Center dist based
-  //let halfGrid = f32(grid.mul.y) * 0.5;
-  //let v = pos - vec3f(halfGrid);
-  //let centerDist = length(v) / halfGrid;
-  // Distance from center with sky and state
-  //return vec3f(0.3, 0.3, 0.6) * vec3f(sky * val / centerDist);
+  /*
   // Distance from center into palette scaled by state and dist
-  //return palette(centerDist, vec3f(0.3), vec3f(0.2), vec3f(0.6, 0.3, 0.3), vec3f(0.3, 0.5, 0.3)) * val * exp(3.5 * -dist);
+  let halfGrid = f32(grid.mul.y) * 0.5;
+  let v = pos - vec3f(halfGrid);
+  let centerDist = length(v) / halfGrid;
+  let col = palette(centerDist, vec3f(0.3), vec3f(0.2), vec3f(0.6, 0.3, 0.3), vec3f(0.3, 0.5, 0.3)) * val * val * 0.5 * exp(-3.5 * (*res).distNorm);
+  */
 
+  let occ = calcOcclusion(pos, (*res).index, vec3i((*res).norm));
+  return col * occ * occ * occ;
+}
 
-  // Fake AO
-  let uv = fract(pos);
-  var occlusion = 1.0;
+fn calcOcclusion(pos: vec3f, index: i32, norm: vec3i) -> f32
+{
+  let above = index + dot(grid.mul, norm);
+  let dir = abs(norm);
+  let hori = dot(grid.mul, dir.yzx);
+  let vert = dot(grid.mul, dir.zxy);
 
-  return vec3f(0.5) * occlusion;
+  let edgeCellStates = vec4f(
+    f32(min(1, grid.arr[above + hori])),
+    f32(min(1, grid.arr[above - hori])),
+    f32(min(1, grid.arr[above + vert])),
+    f32(min(1, grid.arr[above - vert])));
+
+  let cornerCellStates = vec4f(
+    f32(min(1, grid.arr[above + hori + vert])),
+    f32(min(1, grid.arr[above - hori + vert])),
+    f32(min(1, grid.arr[above + hori - vert])),
+    f32(min(1, grid.arr[above - hori - vert])));
+
+  let uvLocal = fract(pos);
+  let uv = vec2f(dot(uvLocal, vec3f(dir.yzx)), dot(uvLocal, vec3f(dir.zxy)));
+  let uvInv = vec2f(1) - uv;
+
+  let edgeOcc = edgeCellStates * vec4f(uv.x, uvInv.x, uv.y, uvInv.y);
+  let cornerOcc = cornerCellStates * vec4f(uv.x * uv.y, uvInv.x * uv.y, uv.x * uvInv.y, uvInv.x * uvInv.y) * (vec4f(1.0) - edgeCellStates.xzwy) * (vec4f(1.0) - edgeCellStates.zyxw);
+
+  return 1.0 - (edgeOcc.x + edgeOcc.y + edgeOcc.z + edgeOcc.w + cornerOcc.x + cornerOcc.y + cornerOcc.z + cornerOcc.w) * 0.5;
 }
 
 @vertex
@@ -261,20 +296,23 @@ fn f(@builtin(position) position: vec4f) -> @location(0) vec4f
   let invDir = 1.0 / dir;
   var tmin: f32;
   var tmax: f32;
-  var t: f32;
-  var norm: vec3f;
+  var res: Result;
 
   if(intersectAabb(vec3f(grid.minc), vec3f(grid.maxc), origin, invDir, &tmin, &tmax)) {
-    tmin = max(-EPSILON, tmin - EPSILON);
-    let state = traverseGrid(origin + tmin * dir, invDir, tmax - tmin - EPSILON, &t, &norm);
-    if(state > 0) {
-      col = shade(origin + (tmin + t) * dir, dir, norm, (tmin + t) / tmax, state);
+    let tminGrid = max(tmin - EPSILON, 0.0);
+    let tmaxGrid = tmax - EPSILON - tminGrid;
+    if(traverseGrid(origin + tminGrid * dir, invDir, tmaxGrid, &res)) {
+      res.distNorm = res.dist / tmaxGrid;
+      col = shade(origin + (tminGrid + res.dist) * dir, dir, &res);
     } /*else
     {
       // Visualize grid box
       col = vec3f(0.005);
     }*/
   }
+
+  // Amplify
+  col += pow(max(col - vec3f(0.3), vec3f(0.0)), vec3f(1.5)) * 0.5;
 
   return vec4f(pow(col, vec3f(0.4545)), 1.0);
 }
