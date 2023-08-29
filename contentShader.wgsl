@@ -13,24 +13,6 @@ struct Uniforms
 struct Grid
 {
   mul: vec3i,
-  pad1: i32,
-  minc: vec3u,
-  pad2: u32,
-  maxc: vec3u,
-  arr: array<u32>
-}
-
-struct OutputGrid
-{
-  mul: vec3i,
-  pad1: i32,
-  minx: atomic<u32>,
-  miny: atomic<u32>,
-  minz: atomic<u32>,
-  pad2: u32,
-  maxx: atomic<u32>,
-  maxy: atomic<u32>,
-  maxz: atomic<u32>,
   arr: array<u32>
 }
 
@@ -58,7 +40,7 @@ const TWO_PI = PI * 2.0;
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(0) @binding(1) var<storage> grid: Grid;
-@group(0) @binding(2) var<storage, read_write> outputGrid: OutputGrid;
+@group(0) @binding(2) var<storage, read_write> outputGrid: Grid;
 @group(0) @binding(3) var<storage> rules: Rules;
 
 fn maxComp(v: vec3f) -> f32
@@ -132,25 +114,15 @@ fn evalMultiState(pos: vec3i, states: u32)
 
   switch(value) {
     case 0: {
-      let newValue = rules.arr[getMooreNeighbourCountWrap(pos)];
-      outputGrid.arr[index] = newValue;
-      if(newValue == 1) {
-        let s = grid.mul.y - 1;
-        atomicMin(&outputGrid.minx, u32(max(0, pos.x - 1)));
-        atomicMin(&outputGrid.miny, u32(max(0, pos.y - 1)));
-        atomicMin(&outputGrid.minz, u32(max(0, pos.z - 1)));
-        atomicMax(&outputGrid.maxx, u32(min(pos.x + 1, s)));
-        atomicMax(&outputGrid.maxy, u32(min(pos.y + 1, s)));
-        atomicMax(&outputGrid.maxz, u32(min(pos.z + 1, s)));
-      }
+      outputGrid.arr[index] = rules.arr[27 + getMooreNeighbourCountWrap(pos)];
     }
     case 1: {
       // Dying state 1 goes to 2
-      outputGrid.arr[index] = 1 + 1 - rules.arr[27 + getMooreNeighbourCountWrap(pos)];
+      outputGrid.arr[index] = (1 + 1 - rules.arr[getMooreNeighbourCountWrap(pos)]) % rules.states;
     }
     default {
       // Refactory period
-      outputGrid.arr[index] = (value + 1) % rules.states;
+      outputGrid.arr[index] = min(value + 1, rules.states) % rules.states; 
     }
   }
 }
@@ -158,15 +130,12 @@ fn evalMultiState(pos: vec3i, states: u32)
 @compute @workgroup_size(4,4,4)
 fn c(@builtin(global_invocation_id) globalId: vec3u)
 {
-  let halfExtent = vec3f(grid.maxc - grid.minc) * 0.5;
-  if(maxComp(abs(vec3f(globalId - grid.minc) - halfExtent) / halfExtent) <= 1.0) {
-    switch(rules.kind) {
-      case 1: {
+  switch(rules.kind) {
+    case 1: {
         // TODO handle different automaton
-      }
-      default: {
+    }
+    default: {
         evalMultiState(vec3i(globalId), rules.states);
-      }
     }
   }
 }
@@ -184,12 +153,12 @@ fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, invDir: vec3f, tmin: 
 
 fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, res: ptr<function, Result>) -> bool
 {
-  let gridMul = vec3f(grid.mul);
+  let mulf = vec3f(grid.mul);
   let stepDir = sign(invDir);
   var t = (vec3f(0.5) + 0.5 * stepDir - fract(ori)) * invDir;
   var mask: vec3f;
 
-  (*res).index = i32(dot(gridMul, floor(ori)));
+  (*res).index = i32(dot(mulf, floor(ori)));
   
   loop {
     (*res).dist = minComp(t);
@@ -202,7 +171,7 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, res: ptr<function, Result>
     mask.z = f32(t.z <= t.x && t.z <= t.y);
 
     t += mask * stepDir * invDir;
-    (*res).index += i32(dot(gridMul, mask * stepDir));
+    (*res).index += i32(dot(mulf, mask * stepDir));
  
     (*res).state = grid.arr[(*res).index];
     if((*res).state > 0) {
@@ -216,36 +185,6 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, res: ptr<function, Result>
 fn palette(t: f32, a: vec3f, b: vec3f, c: vec3f, d: vec3f) -> vec3f
 {
   return a + b * cos(TWO_PI * (c * t + d));
-}
-
-fn shade(pos: vec3f, dir: vec3f, res: ptr<function, Result>) -> vec3f
-{
-  /*
-  // Wireframe, better add AA
-  let border = vec3f(0.5 - 0.02);
-  let wire = (vec3f(1) - abs((*res).norm)) * abs(fract(pos) - vec3f(0.5));
-
-  if(any(vec3<bool>(step(border, wire)))) {
-    return vec3f(0);
-  }
-  */
-
-  let val = f32(rules.states) / f32((*res).state);  
-
-  // Position in cube and z-distance with sky and state
-  let sky = (0.4 + (*res).norm.y * 0.6);
-  let col = pos / f32(grid.mul.y) * val * val * 0.33 * sky * exp(-4 * (*res).distNorm);
-
-  /*
-  // Distance from center into palette scaled by state and dist
-  let halfGrid = f32(grid.mul.y) * 0.5;
-  let v = pos - vec3f(halfGrid);
-  let centerDist = length(v) / halfGrid;
-  let col = palette(centerDist, vec3f(0.3), vec3f(0.2), vec3f(0.6, 0.3, 0.3), vec3f(0.3, 0.5, 0.3)) * val * val * 0.5 * exp(-3.5 * (*res).distNorm);
-  */
-
-  let occ = calcOcclusion(pos, (*res).index, vec3i((*res).norm));
-  return col * occ * occ * occ;
 }
 
 fn calcOcclusion(pos: vec3f, index: i32, norm: vec3i) -> f32
@@ -274,7 +213,36 @@ fn calcOcclusion(pos: vec3f, index: i32, norm: vec3i) -> f32
   let edgeOcc = edgeCellStates * vec4f(uv.x, uvInv.x, uv.y, uvInv.y);
   let cornerOcc = cornerCellStates * vec4f(uv.x * uv.y, uvInv.x * uv.y, uv.x * uvInv.y, uvInv.x * uvInv.y) * (vec4f(1.0) - edgeCellStates.xzwy) * (vec4f(1.0) - edgeCellStates.zyxw);
 
-  return 1.0 - (edgeOcc.x + edgeOcc.y + edgeOcc.z + edgeOcc.w + cornerOcc.x + cornerOcc.y + cornerOcc.z + cornerOcc.w) * 0.5;
+  return 1.0 - (edgeOcc.x + edgeOcc.y + edgeOcc.z + edgeOcc.w + cornerOcc.x + cornerOcc.y + cornerOcc.z + cornerOcc.w) * 0.333;
+}
+
+fn shade(pos: vec3f, dir: vec3f, res: ptr<function, Result>) -> vec3f
+{
+  /*
+  // Wireframe, better add AA
+  let border = vec3f(0.5 - 0.02);
+  let wire = (vec3f(1) - abs((*res).norm)) * abs(fract(pos) - vec3f(0.5));
+
+  if(any(vec3<bool>(step(border, wire)))) {
+    return vec3f(0);
+  }*/
+
+  let val = f32(rules.states) / f32((*res).state);  
+  let sky = (0.4 + (*res).norm.y * 0.6);
+
+/*
+  // Position in cube and z-distance with sky and state
+  let col = pos / f32(grid.mul.y) * sky * 0.1 * val * val * exp(-3 * (*res).distNorm);
+*/
+
+  // Distance from center into palette scaled by state and dist
+  let halfGrid = f32(grid.mul.y) * 0.5;
+  let v = pos - vec3f(halfGrid);
+  let centerDist = length(v) / halfGrid;
+  let col = palette(centerDist, vec3f(0.3), vec3f(0.2), vec3f(0.3, 0.3, 0.6), vec3f(0.1, 0.5, 0.3)) * val * val * sky * 0.234 * exp(-3 * (*res).distNorm);
+
+  let occ = calcOcclusion(pos, (*res).index, vec3i((*res).norm));
+  return col * occ * occ * occ;
 }
 
 @vertex
@@ -298,7 +266,7 @@ fn f(@builtin(position) position: vec4f) -> @location(0) vec4f
   var tmax: f32;
   var res: Result;
 
-  if(intersectAabb(vec3f(grid.minc), vec3f(grid.maxc), origin, invDir, &tmin, &tmax)) {
+  if(intersectAabb(vec3f(0), vec3f(f32(grid.mul.y)), origin, invDir, &tmin, &tmax)) {
     let tminGrid = max(tmin - EPSILON, 0.0);
     let tmaxGrid = tmax - EPSILON - tminGrid;
     if(traverseGrid(origin + tminGrid * dir, invDir, tmaxGrid, &res)) {

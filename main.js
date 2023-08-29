@@ -9,9 +9,9 @@ const FOV = 50.0;
 const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
 
-const GRID_RES = 128;
-const GRID_OFS = 11;
+const MAX_GRID_RES = 128;
 const SEED_AREA = 5;
+const DEFAULT_UPDATE_DELAY = 250;
 
 const MOVE_VELOCITY = 0.5;
 const LOOK_VELOCITY = 0.025;
@@ -39,9 +39,11 @@ let programmableValue;
 let grid;
 let rules;
 
+let gridRes = MAX_GRID_RES;
+
 let start, lastUpdate;
 let simulationSteps = 0;
-let updateDelay = 250;
+let updateDelay = DEFAULT_UPDATE_DELAY;
 let paused = false;
 
 let rand = splitmix32(xmur3("unik"));
@@ -256,8 +258,7 @@ function render(time)
   if(paused)
     lastUpdate = currTime;
   else if(currTime - lastUpdate > updateDelay) {
-    const count = Math.ceil(GRID_RES / 4);
-    device.queue.writeBuffer(gridBuffer[1 - simulationSteps % 2], 16, grid, 16, 28);
+    const count = Math.ceil(gridRes / 4);
     encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationSteps % 2], count, count, count);
     simulationSteps++;
     lastUpdate += updateDelay;
@@ -365,28 +366,20 @@ function copyGrid()
 
 function initGrid()
 {
-  grid = new Uint32Array(GRID_OFS + GRID_RES * GRID_RES * GRID_RES);
+  // Alloc max size array but populate contents dynamically up to current grid res
+  grid = new Uint32Array(3 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
 
   grid[0] = 1;
-  grid[1] = GRID_RES;
-  grid[2] = GRID_RES * GRID_RES;
-  grid[3] = 0.0; // padding
+  grid[1] = gridRes;
+  grid[2] = gridRes * gridRes;
 
-  let min = GRID_RES / 2 - SEED_AREA;
-  grid[4] = min - 1;
-  grid[5] = min - 1;
-  grid[6] = min - 1; 
-  grid[7] = 0.0; // padding
-
-  let max = GRID_RES / 2 + SEED_AREA;
-  grid[8] = max + 1;
-  grid[9] = max + 1;
-  grid[10] = max + 1;
+  const min = gridRes / 2 - SEED_AREA;
+  const max = gridRes / 2 + SEED_AREA;
 
   for(let k=min; k<max; k++)
     for(let j=min; j<max; j++)
       for(let i=min; i<max; i++)
-        grid[GRID_OFS + GRID_RES * GRID_RES * k + GRID_RES * j + i] = rand() > 0.6 ? 1 : 0;
+        grid[3 + gridRes * gridRes * k + gridRes * j + i] = rand() > 0.6 ? 1 : 0;
 }
 
 function copyRules()
@@ -394,31 +387,83 @@ function copyRules()
   device.queue.writeBuffer(rulesBuffer, 0, rules);
 }
 
-function initRules()
+function initRules(rule)
 {
-  rules = new Uint32Array(2 + 2 * 27);
+  const RULE_OFS = 2;
+  const BIRTH_OFS = 27;
+
+  rules = new Uint32Array(RULE_OFS + 2 * 27);
 
   rules[0] = 0; // automaton kind
   rules[1] = 5; // states
 
-  for(let i=0; i<2 * 27; i++)
-    rules[2 + i] = 0;
+  switch(rule) {
+    case 0:
+      // Random rule
+      for(let i=0; i<2 * 27; i++)
+        rules[RULE_OFS + i] = rand() > 0.8 ? 0 : 1;
+      break;
+    case 1:
+      // Equilibrium = no birth, alive stay alive
+      for(let i=0; i<27; i++)
+        rules[RULE_OFS + i] = 1;
+      break;
+    case 2:
+      // Populate all
+      for(let i=0; i<2 * 27; i++)
+        rules[RULE_OFS + i] = 1;
+      break;
+    case 3:
+      // Let everyone die
+      break;
+    case 4:
+      // 4/4/5M
+      rules[RULE_OFS + 4] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 4] = 1;
+      break;
+    case 5:
+      // Amoeba
+      for(let i=9; i<27; i++)
+        rules[RULE_OFS + i] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 5] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 6] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 7] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 12] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 13] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 15] = 1;
+      break;
+    case 6:
+      // Clouds
+      rules[1] = 2;
+      for(let i=13; i<27; i++)
+        rules[RULE_OFS + i] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 13] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 14] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 17] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 18] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 19] = 1;
+      break;
+    case 7:
+      // Pyroclastic
+      rules[1] = 10;
+      rules[RULE_OFS + 4] = 1;
+      rules[RULE_OFS + 5] = 1;
+      rules[RULE_OFS + 6] = 1;
+      rules[RULE_OFS + 7] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 6] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 7] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 8] = 1;
+      break;
+  }
 
-  rules[2 + 4] = 1;
-  rules[2 + 27 + 4] = 1;
-}
-
-function randomizeRules()
-{
-  for(let i=0; i<2 * 27; i++)
-    rules[2 + i] = rand() > 0.8 ? 0 : 1;
+  console.log("Initialized rule " + rule);
 }
 
 function resetView()
 {
-  eye = [GRID_RES, GRID_RES, GRID_RES];
+  eye = [gridRes, gridRes, gridRes];
   eye = vec3Add(eye, vec3Scale(eye, 0.05));
-  fwd = vec3Normalize(vec3Add([GRID_RES/2, GRID_RES/2, GRID_RES/2], vec3Negate(eye)));
+  fwd = vec3Normalize(vec3Add([gridRes/2, gridRes/2, gridRes/2], vec3Negate(eye)));
 
   programmableValue = 0.0;
 }
@@ -431,39 +476,44 @@ function computeView()
 
 function handleKeyEvent(e)
 {
+  if(e.key !== " " && !isNaN(e.key))
+  {
+    initRules(parseInt(e.key));
+    return;
+  }
+
   switch (e.key) {
     case "a":
       eye = vec3Add(eye, vec3Scale(right, -MOVE_VELOCITY));
+      computeView();
       break;
     case "d":
       eye = vec3Add(eye, vec3Scale(right, MOVE_VELOCITY));
+      computeView();
       break;
     case "w":
       eye = vec3Add(eye, vec3Scale(fwd, MOVE_VELOCITY));
+      computeView();
       break;
     case "s":
       eye = vec3Add(eye, vec3Scale(fwd, -MOVE_VELOCITY));
+      computeView();
       break;
     case "r":
       resetView();
+      computeView();
       break;
    case "i":
       initGrid();
+      console.log("Initialized grid");
       break;
     case "k":
       copyGrid()
       console.log("Copied grid");
       break;
-    case "o":
-      initRules();
-      break;
-    case "l":
+    case "+":
       copyRules();
-      console.log("Copied rules");
-      break;
-    case "#":
-      randomizeRules();
-      console.log("Randomized rules");
+      console.log("Copied rule");
       break;
     case "p":
       createPipelines();
@@ -471,10 +521,9 @@ function handleKeyEvent(e)
       break;
     case " ":
       paused = !paused;
+      console.log("Paused simulation");
     break;
-  };
-
-  computeView();
+  }
 }
 
 function handleMouseMoveEvent(e)
@@ -505,6 +554,8 @@ function handleMouseWheelEvent(e)
 {
   programmableValue -= e.deltaY * WHEEL_VELOCITY;
   console.log("value:" + programmableValue);
+
+  updateDelay = DEFAULT_UPDATE_DELAY + programmableValue;
 }
 
 function startRender()
@@ -574,7 +625,7 @@ async function main()
   }
 
   initGrid();
-  initRules();
+  initRules(1);
 
   await createGPUResources();
   await createPipelines();
