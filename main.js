@@ -4,18 +4,17 @@ const AUDIO = false;
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 1024;
 const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
-const FOV = 50.0;
+const FOV = 60.0;
 
 const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
 
 const MAX_GRID_RES = 128;
-const SEED_AREA = 5;
 const DEFAULT_UPDATE_DELAY = 250;
 
-const MOVE_VELOCITY = 0.5;
+const MOVE_VELOCITY = 0.75;
 const LOOK_VELOCITY = 0.025;
-const WHEEL_VELOCITY = 0.0025;
+const WHEEL_VELOCITY = 0.005;
 
 let audioContext;
 let audioBufferSourceNode;
@@ -38,11 +37,12 @@ let programmableValue;
 
 let grid;
 let rules;
-
-let gridRes = MAX_GRID_RES;
+let currGridRes = MAX_GRID_RES;
 
 let start, lastUpdate;
 let simulationSteps = 0;
+
+let currTime = 0;
 let updateDelay = DEFAULT_UPDATE_DELAY;
 let paused = false;
 
@@ -252,13 +252,14 @@ function render(time)
     lastUpdate = start;
   }
 
-  const currTime = AUDIO ? (audioContext.currentTime * 1000.0) : (time - start);
+  currTime = AUDIO ? (audioContext.currentTime * 1000.0) : (time - start);
+  
   const commandEncoder = device.createCommandEncoder();
 
   if(paused)
     lastUpdate = currTime;
   else if(currTime - lastUpdate > updateDelay) {
-    const count = Math.ceil(gridRes / 4);
+    const count = Math.ceil(currGridRes / 4);
     encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationSteps % 2], count, count, count);
     simulationSteps++;
     lastUpdate += updateDelay;
@@ -362,29 +363,43 @@ function copyGrid()
 { 
   device.queue.writeBuffer(gridBuffer[0], 0, grid);
   device.queue.writeBuffer(gridBuffer[1], 0, grid); 
+
+  console.log(">> Copied grid");
 }
 
-function initGrid()
+function initGrid(gridRes, seedAreaHalf)
 {
-  // Alloc max size array but populate contents dynamically up to current grid res
-  grid = new Uint32Array(3 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
+  if(grid === undefined)
+    // Alloc max size array but populate contents dynamically up to current grid res
+    grid = new Uint32Array(3 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
+  else
+    for(let i=0; i<grid.length; i++)
+      grid[i] = 0;
 
   grid[0] = 1;
   grid[1] = gridRes;
   grid[2] = gridRes * gridRes;
 
-  const min = gridRes / 2 - SEED_AREA;
-  const max = gridRes / 2 + SEED_AREA;
+  const center = gridRes / 2;
+  const min = center - seedAreaHalf;
+  const max = center + seedAreaHalf;
 
   for(let k=min; k<max; k++)
     for(let j=min; j<max; j++)
       for(let i=min; i<max; i++)
         grid[3 + gridRes * gridRes * k + gridRes * j + i] = rand() > 0.6 ? 1 : 0;
+
+  console.log(`${currTime}, initGrid, ${gridRes}, ${seedAreaHalf}`);
+
+  if(currTime > 0)
+    copyGrid();
 }
 
 function copyRules()
 {
   device.queue.writeBuffer(rulesBuffer, 0, rules);
+
+  console.log(">> Copied rules");
 }
 
 function initRules(rule)
@@ -392,37 +407,29 @@ function initRules(rule)
   const RULE_OFS = 2;
   const BIRTH_OFS = 27;
 
-  rules = new Uint32Array(RULE_OFS + 2 * 27);
+  if(rules === undefined)
+    rules = new Uint32Array(RULE_OFS + 2 * 27);
+  else
+    for(let i=0; i<rules.length; i++)
+      rules[i] = 0;
 
   rules[0] = 0; // automaton kind
   rules[1] = 5; // states
 
+  let id;
   switch(rule) {
-    case 0:
-      // Random rule
-      for(let i=0; i<2 * 27; i++)
-        rules[RULE_OFS + i] = rand() > 0.8 ? 0 : 1;
-      break;
     case 1:
-      // Equilibrium = no birth, alive stay alive
+      id = "equilibrium";
       for(let i=0; i<27; i++)
         rules[RULE_OFS + i] = 1;
       break;
     case 2:
-      // Populate all
-      for(let i=0; i<2 * 27; i++)
-        rules[RULE_OFS + i] = 1;
-      break;
-    case 3:
-      // Let everyone die
-      break;
-    case 4:
-      // 4/4/5M
+      id = "445";
       rules[RULE_OFS + 4] = 1;
       rules[RULE_OFS + BIRTH_OFS + 4] = 1;
       break;
-    case 5:
-      // Amoeba
+    case 3:
+      id = "amoeba";
       for(let i=9; i<27; i++)
         rules[RULE_OFS + i] = 1;
       rules[RULE_OFS + BIRTH_OFS + 5] = 1;
@@ -432,19 +439,8 @@ function initRules(rule)
       rules[RULE_OFS + BIRTH_OFS + 13] = 1;
       rules[RULE_OFS + BIRTH_OFS + 15] = 1;
       break;
-    case 6:
-      // Clouds
-      rules[1] = 2;
-      for(let i=13; i<27; i++)
-        rules[RULE_OFS + i] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 13] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 14] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 17] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 18] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 19] = 1;
-      break;
-    case 7:
-      // Pyroclastic
+    case 4:
+      id = "pyro"; 
       rules[1] = 10;
       rules[RULE_OFS + 4] = 1;
       rules[RULE_OFS + 5] = 1;
@@ -454,16 +450,52 @@ function initRules(rule)
       rules[RULE_OFS + BIRTH_OFS + 7] = 1;
       rules[RULE_OFS + BIRTH_OFS + 8] = 1;
       break;
+    case 5:
+      id = "empty";
+      break;
+    case 6:
+      id = "empty";
+      break;
+    case 7:
+      id = "empty";
+      break;
+    case 8:
+      id = "single";
+      rules[1] = 2;
+      rules[RULE_OFS + BIRTH_OFS + 2] = 1;
+      break;
+    case 9:
+      id = "clouds";
+      rules[1] = 2;
+      for(let i=13; i<27; i++)
+        rules[RULE_OFS + i] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 13] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 14] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 17] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 18] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 19] = 1;
+      break;
+    case 0:
+      id = "decay";
+      rules[1] = 3;
+      for(let i=13; i<27; i++)
+        rules[RULE_OFS + i] = 1;
+      for(let i=10; i<27; i++)
+        rules[RULE_OFS + BIRTH_OFS + i] = 1;
+      break;
   }
 
-  console.log("Initialized rule " + rule);
+  console.log(`${currTime}, initRules, ${rule}, "${id}"`);
+
+  if(currTime > 0)
+    copyRules();
 }
 
 function resetView()
 {
-  eye = [gridRes, gridRes, gridRes];
+  eye = [currGridRes, currGridRes, currGridRes];
   eye = vec3Add(eye, vec3Scale(eye, 0.05));
-  fwd = vec3Normalize(vec3Add([gridRes/2, gridRes/2, gridRes/2], vec3Negate(eye)));
+  fwd = vec3Normalize(vec3Add([currGridRes/2, currGridRes/2, currGridRes/2], vec3Negate(eye)));
 
   programmableValue = 0.0;
 }
@@ -504,24 +536,13 @@ function handleKeyEvent(e)
       computeView();
       break;
    case "i":
-      initGrid();
-      console.log("Initialized grid");
+      initGrid(currGridRes, 7);
       break;
-    case "k":
-      copyGrid()
-      console.log("Copied grid");
-      break;
-    case "+":
-      copyRules();
-      console.log("Copied rule");
-      break;
-    case "p":
+   case "p":
       createPipelines();
-      console.log("Shader module reloaded");
       break;
     case " ":
       paused = !paused;
-      console.log("Paused simulation");
     break;
   }
 }
@@ -600,8 +621,6 @@ function startRender()
   }
 
   requestAnimationFrame(render);
-
-  //setInterval(createPipelines, 500); // Reload shader
 }
 
 async function main()
@@ -624,7 +643,7 @@ async function main()
     await prepareAudio();
   }
 
-  initGrid();
+  initGrid(currGridRes, 7);
   initRules(1);
 
   await createGPUResources();
