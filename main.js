@@ -4,13 +4,14 @@ const AUDIO = false;
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 1024;
 const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
-const FOV = 60.0;
+const FOV = 50.0;
 
 const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
 
 const MAX_GRID_RES = 128;
-const DEFAULT_UPDATE_DELAY = 250;
+const DEFAULT_UPDATE_DELTA = 128;
+const SIMULATION_OUTPUT_OFS = 0;
 
 const MOVE_VELOCITY = 0.75;
 const LOOK_VELOCITY = 0.025;
@@ -39,34 +40,22 @@ let grid;
 let rules;
 let currGridRes = MAX_GRID_RES;
 
-let start, lastUpdate;
-let simulationSteps = 0;
+let start;
+let paused = true;
+let updateDelta = DEFAULT_UPDATE_DELTA;
+let lastSimulationUpdate = 0;
+let simulationStep = 0;
 
-let currTime = 0;
-let updateDelay = DEFAULT_UPDATE_DELAY;
-let paused = false;
-
-let rand = splitmix32(xmur3("unik"));
+let rand = splitmix32(Math.floor(Math.random() * 4294967296));
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
 function splitmix32(a) {
+  console.log("Seed: " + a);
   return function() {
     a |= 0; a = a + 0x9e3779b9 | 0;
     var t = a ^ a >>> 16; t = Math.imul(t, 0x21f0aaad);
     t = t ^ t >>> 15; t = Math.imul(t, 0x735a2d97);
     return ((t = t ^ t >>> 15) >>> 0) / 4294967296;
-  }
-}
-
-function xmur3(str)
-{
-  for(var i=0, h=1779033703 ^ str.length; i<str.length; i++)
-    h = Math.imul(h ^ str.charCodeAt(i), 3432918353), h = h << 13 | h >>> 19;
-  return function()
-  {
-    h = Math.imul(h ^ h >>> 16, 2246822507),
-    h = Math.imul(h ^ h >>> 13, 3266489909);
-    return (h ^= h >>> 16) >>> 0;
   }
 }
 
@@ -199,7 +188,7 @@ async function createGPUResources()
     ]
   });
  
-  // right, up, fwd, eye, fov, time, 2 x programmable value (= padding)
+  // right, up, fwd, eye, fov, time, simulation step, programmable value/padding
   uniformBuffer = device.createBuffer({
     size: 16 * 4,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
@@ -247,22 +236,22 @@ async function createPipelines()
 
 function render(time)
 {
-  if (start === undefined) {
+  if(start === undefined)
     start = AUDIO ? (audioContext.currentTime * 1000.0) : time;
-    lastUpdate = start;
-  }
 
-  currTime = AUDIO ? (audioContext.currentTime * 1000.0) : (time - start);
-  
-  const commandEncoder = device.createCommandEncoder();
+  const currTime = AUDIO ? (audioContext.currentTime * 1000.0) : (time - start); 
 
   if(paused)
-    lastUpdate = currTime;
-  else if(currTime - lastUpdate > updateDelay) {
+    lastSimulationUpdate = currTime;
+  
+  const commandEncoder = device.createCommandEncoder();
+ 
+  // TODO Distribute one simulation step across different frames (within updateDelta 'budget')
+  if(currTime - lastSimulationUpdate > updateDelta) {
     const count = Math.ceil(currGridRes / 4);
-    encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationSteps % 2], count, count, count);
-    simulationSteps++;
-    lastUpdate += updateDelay;
+    encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationStep % 2], count, count, count);
+    lastSimulationUpdate += updateDelta;
+    simulationStep++;
   }
 
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
@@ -271,15 +260,15 @@ function render(time)
     ...up,
     currTime,
     ...fwd,
-    programmableValue,
+    simulationStep,
     ...eye,
-    1.0 // programmableValue2
+    programmableValue
   ]));
 
   setupPerformanceTimer();
 
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
-  encodeRenderPassAndSubmit(commandEncoder, renderPassDescriptor, renderPipeline, bindGroup[simulationSteps % 2]);
+  encodeRenderPassAndSubmit(commandEncoder, renderPassDescriptor, renderPipeline, bindGroup[simulationStep % 2]);
   
   device.queue.submit([commandEncoder.finish()]);
 
@@ -289,7 +278,6 @@ function render(time)
 function setupPerformanceTimer(timerName)
 {
   let begin = performance.now();
-
   device.queue.onSubmittedWorkDone()
     .then(function() {
       let end = performance.now();
@@ -359,22 +347,10 @@ function axisRotation(axis, angle)
           0, 0, 0, 1]
 }
 
-function copyGrid()
-{ 
-  device.queue.writeBuffer(gridBuffer[0], 0, grid);
-  device.queue.writeBuffer(gridBuffer[1], 0, grid); 
-
-  console.log(">> Copied grid");
-}
-
 function initGrid(gridRes, seedAreaHalf)
 {
-  if(grid === undefined)
-    // Alloc max size array but populate contents dynamically up to current grid res
-    grid = new Uint32Array(3 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
-  else
-    for(let i=0; i<grid.length; i++)
-      grid[i] = 0;
+  for(let i=0; i<grid.length; i++)
+    grid[i] = 0;
 
   grid[0] = 1;
   grid[1] = gridRes;
@@ -387,48 +363,33 @@ function initGrid(gridRes, seedAreaHalf)
   for(let k=min; k<max; k++)
     for(let j=min; j<max; j++)
       for(let i=min; i<max; i++)
-        grid[3 + gridRes * gridRes * k + gridRes * j + i] = rand() > 0.6 ? 1 : 0;
+        grid[3 + gridRes * gridRes * k + gridRes * j + i] = rand() > 0.7 ? 1 : 0;
 
-  console.log(`${currTime}, initGrid, ${gridRes}, ${seedAreaHalf}`);
+  device.queue.writeBuffer(gridBuffer[0], 0, grid);
+  device.queue.writeBuffer(gridBuffer[1], 0, grid);
 
-  if(currTime > 0)
-    copyGrid();
+  console.log(`${(SIMULATION_OUTPUT_OFS + simulationStep)}, initGrid, ${gridRes}, ${seedAreaHalf}`);
 }
 
-function copyRules()
-{
-  device.queue.writeBuffer(rulesBuffer, 0, rules);
-
-  console.log(">> Copied rules");
-}
-
-function initRules(rule)
+function initRules(ruleSet)
 {
   const RULE_OFS = 2;
   const BIRTH_OFS = 27;
 
-  if(rules === undefined)
-    rules = new Uint32Array(RULE_OFS + 2 * 27);
-  else
-    for(let i=0; i<rules.length; i++)
-      rules[i] = 0;
+  for(let i=0; i<rules.length; i++)
+    rules[i] = 0;
 
   rules[0] = 0; // automaton kind
   rules[1] = 5; // states
 
   let id;
-  switch(rule) {
+  switch(ruleSet) {
     case 1:
-      id = "equilibrium";
-      for(let i=0; i<27; i++)
-        rules[RULE_OFS + i] = 1;
-      break;
-    case 2:
       id = "445";
       rules[RULE_OFS + 4] = 1;
       rules[RULE_OFS + BIRTH_OFS + 4] = 1;
       break;
-    case 3:
+    case 2:
       id = "amoeba";
       for(let i=9; i<27; i++)
         rules[RULE_OFS + i] = 1;
@@ -439,9 +400,9 @@ function initRules(rule)
       rules[RULE_OFS + BIRTH_OFS + 13] = 1;
       rules[RULE_OFS + BIRTH_OFS + 15] = 1;
       break;
-    case 4:
-      id = "pyro"; 
-      rules[1] = 10;
+    case 3:
+      id = "pyro5"; 
+      rules[1] = 5;
       rules[RULE_OFS + 4] = 1;
       rules[RULE_OFS + 5] = 1;
       rules[RULE_OFS + 6] = 1;
@@ -450,13 +411,16 @@ function initRules(rule)
       rules[RULE_OFS + BIRTH_OFS + 7] = 1;
       rules[RULE_OFS + BIRTH_OFS + 8] = 1;
       break;
+    case 4:
+      id = "empty";
+      break;
     case 5:
       id = "empty";
       break;
     case 6:
       id = "empty";
       break;
-    case 7:
+     case 7:
       id = "empty";
       break;
     case 8:
@@ -466,7 +430,7 @@ function initRules(rule)
       break;
     case 9:
       id = "clouds";
-      rules[1] = 2;
+      rules[1] = 5;
       for(let i=13; i<27; i++)
         rules[RULE_OFS + i] = 1;
       rules[RULE_OFS + BIRTH_OFS + 13] = 1;
@@ -485,10 +449,9 @@ function initRules(rule)
       break;
   }
 
-  console.log(`${currTime}, initRules, ${rule}, "${id}"`);
-
-  if(currTime > 0)
-    copyRules();
+  device.queue.writeBuffer(rulesBuffer, 0, rules);
+  
+  console.log(`${(SIMULATION_OUTPUT_OFS + simulationStep)}, initRules, ${ruleSet}, "${id}"`);
 }
 
 function resetView()
@@ -498,6 +461,8 @@ function resetView()
   fwd = vec3Normalize(vec3Add([currGridRes/2, currGridRes/2, currGridRes/2], vec3Negate(eye)));
 
   programmableValue = 0.0;
+
+  computeView();
 }
 
 function computeView()
@@ -533,12 +498,17 @@ function handleKeyEvent(e)
       break;
     case "r":
       resetView();
-      computeView();
       break;
-   case "i":
-      initGrid(currGridRes, 7);
+    case "i":
+      initGrid(currGridRes, 15);
       break;
-   case "p":
+    case "+":
+      updateDelta += updateDelta / 4;
+      break;
+    case "-":
+      updateDelta -= updateDelta / 4;
+      break;
+    case "p":
       createPipelines();
       break;
     case " ":
@@ -557,10 +527,10 @@ function handleMouseMoveEvent(e)
   const minPitch = Math.PI / 180.0;
   const maxPitch = 179.0 * Math.PI / 180.0;
 
-  if (newPitch < minPitch) {
+  if(newPitch < minPitch) {
     pitch = currentPitch - minPitch;
   }
-  if (newPitch > maxPitch) {
+  if(newPitch > maxPitch) {
     pitch = currentPitch - maxPitch;
   }
 
@@ -574,14 +544,11 @@ function handleMouseMoveEvent(e)
 function handleMouseWheelEvent(e)
 {
   programmableValue -= e.deltaY * WHEEL_VELOCITY;
-  console.log("value:" + programmableValue);
-
-  updateDelay = DEFAULT_UPDATE_DELAY + programmableValue;
 }
 
 function startRender()
 {
-  if (FULLSCREEN) {
+  if(FULLSCREEN) {
     canvas.requestFullscreen();
   } else {
     canvas.style.width = CANVAS_WIDTH;
@@ -591,21 +558,20 @@ function startRender()
     canvas.style.top = 0;
   }
 
+  initGrid(currGridRes, 15);
+  initRules(1);
   resetView();
-  computeView();
-  copyGrid();
-  copyRules();
 
   document.querySelector("button").removeEventListener("click", startRender);
 
   canvas.addEventListener("click", async () => {
-    if (!document.pointerLockElement) {
+    if(!document.pointerLockElement) {
       await canvas.requestPointerLock({unadjustedMovement: true});
     }
   });
 
   document.addEventListener("pointerlockchange", () => {
-    if (document.pointerLockElement === canvas) {
+    if(document.pointerLockElement === canvas) {
       document.addEventListener("keydown", handleKeyEvent);
       canvas.addEventListener("mousemove", handleMouseMoveEvent);
       canvas.addEventListener("wheel", handleMouseWheelEvent);
@@ -616,7 +582,7 @@ function startRender()
     }
   });
 
-  if (AUDIO) {
+  if(AUDIO) {
     audioBufferSourceNode.start();
   }
 
@@ -625,26 +591,27 @@ function startRender()
 
 async function main()
 {
-  if (!navigator.gpu) {
+  if(!navigator.gpu) {
     throw new Error("WebGPU is not supported on this browser.");
   }
 
   const gpuAdapter = await navigator.gpu.requestAdapter();
-  if (!gpuAdapter) {
+  if(!gpuAdapter) {
     throw new Error("Can not use WebGPU. No GPU adapter available.");
   }
 
   device = await gpuAdapter.requestDevice();
-  if (!device) {
+  if(!device) {
     throw new Error("Failed to request logical device.");
   }
 
-  if (AUDIO) {
+  if(AUDIO) {
     await prepareAudio();
   }
 
-  initGrid(currGridRes, 7);
-  initRules(1);
+  // Initialize to max size even if we only use a portion of it
+  grid = new Uint32Array(3 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
+  rules = new Uint32Array(2 + 2 * 27);
 
   await createGPUResources();
   await createPipelines();
@@ -655,13 +622,13 @@ async function main()
   canvas.height = CANVAS_HEIGHT;
 
   let presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-  if (presentationFormat !== "bgra8unorm")
+  if(presentationFormat !== "bgra8unorm")
     throw new Error(`Expected canvas pixel format of bgra8unorm but was '${presentationFormat}'.`);
 
   context = canvas.getContext("webgpu");
   context.configure({device, format: presentationFormat, alphaMode: "opaque"});
 
-  if (AUDIO || FULLSCREEN) {
+  if(AUDIO || FULLSCREEN) {
     document.querySelector("button").addEventListener("click", startRender);
   } else {
     startRender();

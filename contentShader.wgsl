@@ -5,9 +5,9 @@ struct Uniforms
   up: vec3f,
   time: f32,
   forward: vec3f,
-  freeValue1: f32,
+  simulationStep: f32,
   eye: vec3f,
-  freeValue2: f32
+  freeValue: f32
 }
 
 struct Grid
@@ -184,7 +184,7 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, hit: ptr<function, Hit>) -
 // iq/rgba
 fn palette(t: f32, a: vec3f, b: vec3f, c: vec3f, d: vec3f) -> vec3f
 {
-  return a + b * cos(TWO_PI * (c * t + d + uniforms.time * 0.000001));
+  return a + b * cos(TWO_PI * (c * t + d + uniforms.simulationStep * 0.001));
 }
 
 fn calcOcclusion(pos: vec3f, index: i32, norm: vec3i) -> f32
@@ -213,7 +213,7 @@ fn calcOcclusion(pos: vec3f, index: i32, norm: vec3i) -> f32
   let edgeOcc = edgeCellStates * vec4f(uv.x, uvInv.x, uv.y, uvInv.y);
   let cornerOcc = cornerCellStates * vec4f(uv.x * uv.y, uvInv.x * uv.y, uv.x * uvInv.y, uvInv.x * uvInv.y) * (vec4f(1.0) - edgeCellStates.xzwy) * (vec4f(1.0) - edgeCellStates.zyxw);
 
-  return 1.0 - (edgeOcc.x + edgeOcc.y + edgeOcc.z + edgeOcc.w + cornerOcc.x + cornerOcc.y + cornerOcc.z + cornerOcc.w) * 0.333;
+  return 1.0 - (edgeOcc.x + edgeOcc.y + edgeOcc.z + edgeOcc.w + cornerOcc.x + cornerOcc.y + cornerOcc.z + cornerOcc.w) * 0.5;
 }
 
 fn shade(pos: vec3f, hit: ptr<function, Hit>) -> vec3f
@@ -227,19 +227,19 @@ fn shade(pos: vec3f, hit: ptr<function, Hit>) -> vec3f
     return vec3f(0);
   }*/
 
-  let val = f32(rules.states) / f32((*hit).state);  
+  let val = f32(rules.states) / f32(min((*hit).state, rules.states));
   let sky = (0.4 + (*hit).norm.y * 0.6);
 
-/*
   // Position in cube and z-distance with sky and state
-  let col = pos / f32(grid.mul.y) * sky * 0.1 * val * val * exp(-3 * (*hit).dist / (*hit).maxDist);
-*/
+  let col = pos / f32(grid.mul.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
 
+/*
   // Distance from center into palette scaled by state and dist
   let halfGrid = f32(grid.mul.y) * 0.5;
   let v = pos - vec3f(halfGrid);
   let centerDist = length(v) / halfGrid;
-  let col = palette(centerDist, vec3f(0.1), vec3f(0.2), vec3f(0.3, 0.3, 0.6), vec3f(0.3, 0.6, 0.9)) * val * val * sky * 0.42 * exp(-3 * (*hit).dist / (*hit).maxDist);
+  let col = palette(centerDist, vec3f(0.1), vec3f(0.2), vec3f(0.3), vec3f(0.1, 0.3, 0.6)) * val * val * 0.3 * exp(-3 * (*hit).dist / (*hit).maxDist);
+*/
 
   let occ = calcOcclusion(pos, (*hit).index, vec3i((*hit).norm));
   return col * occ * occ * occ;
@@ -260,7 +260,7 @@ fn f(@builtin(position) position: vec4f) -> @location(0) vec4f
   let dirEyeSpace = normalize(vec3f((position.xy - vec2f(WIDTH, HEIGHT) * 0.5) / f32(HEIGHT), uniforms.tanHalfFov));
   let dir = uniforms.right * dirEyeSpace.x - uniforms.up * dirEyeSpace.y + uniforms.forward * dirEyeSpace.z;
 
-  var col = vec3f(0); // vec3f(0.3, 0.3, 0.6) * 0.005;
+  var col = vec3f(0.3, 0.3, 0.6) * 0.005;
   let invDir = 1.0 / dir;
   var tmin: f32;
   var tmax: f32;
