@@ -189,6 +189,7 @@ fn palette(t: f32, a: vec3f, b: vec3f, c: vec3f, d: vec3f) -> vec3f
 
 fn calcOcclusion(pos: vec3f, index: i32, norm: vec3i) -> f32
 {
+  // TODO Set out of grid cells to state 0?
   let above = index + dot(grid.mul, norm);
   let dir = abs(norm);
   let hori = dot(grid.mul, dir.yzx);
@@ -216,7 +217,7 @@ fn calcOcclusion(pos: vec3f, index: i32, norm: vec3i) -> f32
   return 1.0 - (edgeOcc.x + edgeOcc.y + edgeOcc.z + edgeOcc.w + cornerOcc.x + cornerOcc.y + cornerOcc.z + cornerOcc.w) * 0.5;
 }
 
-fn shade(pos: vec3f, hit: ptr<function, Hit>) -> vec3f
+fn shade(pos: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> vec3f
 {
   /*
   // Wireframe, better add AA
@@ -228,7 +229,7 @@ fn shade(pos: vec3f, hit: ptr<function, Hit>) -> vec3f
   }*/
 
   let val = f32(rules.states) / f32(min((*hit).state, rules.states));
-  let sky = (0.4 + (*hit).norm.y * 0.6);
+  let sky = 0.4 + (*hit).norm.y * 0.6;
 
   // Position in cube and z-distance with sky and state
   let col = pos / f32(grid.mul.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
@@ -243,6 +244,12 @@ fn shade(pos: vec3f, hit: ptr<function, Hit>) -> vec3f
 
   let occ = calcOcclusion(pos, (*hit).index, vec3i((*hit).norm));
   return col * occ * occ * occ;
+}
+
+fn background(ori: vec3f, dir: vec3f) -> vec3f
+{
+  let a = (1.01 - (0.4 + dir.y * 0.6));
+  return vec3f(0.00003) / (a * a); 
 }
 
 @vertex
@@ -260,7 +267,7 @@ fn f(@builtin(position) position: vec4f) -> @location(0) vec4f
   let dirEyeSpace = normalize(vec3f((position.xy - vec2f(WIDTH, HEIGHT) * 0.5) / f32(HEIGHT), uniforms.tanHalfFov));
   let dir = uniforms.right * dirEyeSpace.x - uniforms.up * dirEyeSpace.y + uniforms.forward * dirEyeSpace.z;
 
-  var col = vec3f(0.3, 0.3, 0.6) * 0.005;
+  var col = background(origin, dir);
   let invDir = 1.0 / dir;
   var tmin: f32;
   var tmax: f32;
@@ -270,7 +277,7 @@ fn f(@builtin(position) position: vec4f) -> @location(0) vec4f
     tmin = max(tmin - EPSILON, 0.0);
     hit.maxDist = tmax - EPSILON - tmin;
     if(traverseGrid(origin + tmin * dir, invDir, hit.maxDist, &hit)) {
-      col = shade(origin + (tmin + hit.dist) * dir, &hit);
+      col = shade(origin + (tmin + hit.dist) * dir, dir, &hit);
     } /*else
     {
       // Visualize grid box

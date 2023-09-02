@@ -1,5 +1,7 @@
 const FULLSCREEN = false;
 const AUDIO = false;
+const RECORDING = true;
+const START_PAUSED = RECORDING | false;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 1024;
@@ -10,12 +12,13 @@ const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
 
 const MAX_GRID_RES = 128;
-const DEFAULT_UPDATE_DELTA = 128;
-const SIMULATION_OUTPUT_OFS = 0;
+const DEFAULT_UPDATE_DELTA = 256;
+const SIMULATION_RECORDING_OFS = 0;
 
 const MOVE_VELOCITY = 0.75;
 const LOOK_VELOCITY = 0.025;
 const WHEEL_VELOCITY = 0.005;
+const UPDATE_DELTA_CHANGE_FACTOR = 4;
 
 let audioContext;
 let audioBufferSourceNode;
@@ -36,21 +39,53 @@ let context;
 let right, up, fwd, eye;
 let programmableValue;
 
+let seed = Math.floor(Math.random() * 4294967296);
+let rand;
+let gridRes;
 let grid;
+let updateDelta;
 let rules;
-let currGridRes = MAX_GRID_RES;
 
 let start;
-let paused = true;
-let updateDelta = DEFAULT_UPDATE_DELTA;
-let lastSimulationUpdate = 0;
-let simulationStep = 0;
+let paused = START_PAUSED;
+let lastSimulationUpdate;
+let simulationStep;
+let activeSimulationStep;
 
-let rand = splitmix32(Math.floor(Math.random() * 4294967296));
+let gridEvents = [
+{ step: 0, obj: { gridRes: 128, seed: 1880810298, area: 4 } },
+];
+
+let ruleEvents = [
+{ step: 0, obj: { ruleSet: 2 } }, // amoeba
+{ step: 91, obj: { ruleSet: 9 } }, // clouds
+{ step: 104, obj: { ruleSet: 8 } }, // single
+{ step: 110, obj: { ruleSet: 2 } }, // amoeba
+{ step: 136, obj: { ruleSet: 3 } }, // pyro5
+{ step: 149, obj: { ruleSet: 2 } }, // amoeba
+{ step: 167, obj: { ruleSet: 1 } }, // 445
+{ step: 534, obj: { ruleSet: 7 } }, // empty
+];
+
+let simulationSpeedEvents = [
+{ step: 0, obj: { delta: 256 } },
+{ step: 40, obj: { delta: 192 } },
+{ step: 41, obj: { delta: 144 } },
+{ step: 70, obj: { delta: 180 } },
+{ step: 70, obj: { delta: 225 } },
+{ step: 71, obj: { delta: 281 } },
+{ step: 80, obj: { delta: 351 } },
+{ step: 184, obj: { delta: 263 } },
+{ step: 185, obj: { delta: 197 } },
+{ step: 185, obj: { delta: 148 } },
+{ step: 187, obj: { delta: 111 } },
+];
+
+let cameraEvents = [];
+let fadeEvents = [];
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
 function splitmix32(a) {
-  console.log("Seed: " + a);
   return function() {
     a |= 0; a = a + 0x9e3779b9 | 0;
     var t = a ^ a >>> 16; t = Math.imul(t, 0x21f0aaad);
@@ -144,7 +179,7 @@ async function prepareAudio()
     size: AUDIO_WIDTH * AUDIO_HEIGHT * 2 * 4
   });
 
-  setupPerformanceTimer("Audio");
+  setPerformanceTimer("Audio");
 
   let shaderModule = device.createShaderModule({code: await loadTextFile("audioShader.wgsl")});
   let pipelineLayout = device.createPipelineLayout({bindGroupLayouts: [bindGroupLayout]});
@@ -188,7 +223,7 @@ async function createGPUResources()
     ]
   });
  
-  // right, up, fwd, eye, fov, time, simulation step, programmable value/padding
+  // Buffer space for right, up, fwd, eye, fov, time, simulation step, programmable value/padding
   uniformBuffer = device.createBuffer({
     size: 16 * 4,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
@@ -236,19 +271,26 @@ async function createPipelines()
 
 function render(time)
 {
-  if(start === undefined)
+  if(start === undefined) {
     start = AUDIO ? (audioContext.currentTime * 1000.0) : time;
+    lastSimulationUpdate = 0;
+    simulationStep = 0;
+    activeSimulationStep = -1;
+  }
 
   const currTime = AUDIO ? (audioContext.currentTime * 1000.0) : (time - start); 
 
   if(paused)
     lastSimulationUpdate = currTime;
-  
+
+  if(!paused && !RECORDING)
+    update(currTime);
+
   const commandEncoder = device.createCommandEncoder();
  
   // TODO Distribute one simulation step across different frames (within updateDelta 'budget')
   if(currTime - lastSimulationUpdate > updateDelta) {
-    const count = Math.ceil(currGridRes / 4);
+    const count = Math.ceil(gridRes / 4);
     encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationStep % 2], count, count, count);
     lastSimulationUpdate += updateDelta;
     simulationStep++;
@@ -265,7 +307,7 @@ function render(time)
     programmableValue
   ]));
 
-  setupPerformanceTimer();
+  setPerformanceTimer();
 
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
   encodeRenderPassAndSubmit(commandEncoder, renderPassDescriptor, renderPipeline, bindGroup[simulationStep % 2]);
@@ -275,7 +317,31 @@ function render(time)
   requestAnimationFrame(render);
 }
 
-function setupPerformanceTimer(timerName)
+function updateEvents(events, updateFunction)
+{
+  events.forEach(e => {
+    if(e.step == simulationStep) {
+      updateFunction(e.obj);
+      return;
+    }
+  });
+}
+
+function update(currTime)
+{
+  if(simulationStep > activeSimulationStep)
+  {
+    updateEvents(gridEvents, setGrid);
+    updateEvents(ruleEvents, setRules);
+    updateEvents(simulationSpeedEvents, setUpdateDelta);
+
+    // TODO Camera update
+  }
+
+  activeSimulationStep = simulationStep;
+}
+
+function setPerformanceTimer(timerName)
 {
   let begin = performance.now();
   device.queue.onSubmittedWorkDone()
@@ -347,18 +413,25 @@ function axisRotation(axis, angle)
           0, 0, 0, 1]
 }
 
-function initGrid(gridRes, seedAreaHalf)
+function setGrid(obj)
 {
   for(let i=0; i<grid.length; i++)
     grid[i] = 0;
+
+  if(rand === undefined || obj.seed != seed) {
+    seed = obj.seed;
+    rand = splitmix32(seed);
+  }
+
+  gridRes = Math.min(obj.gridRes, MAX_GRID_RES);
 
   grid[0] = 1;
   grid[1] = gridRes;
   grid[2] = gridRes * gridRes;
 
   const center = gridRes / 2;
-  const min = center - seedAreaHalf;
-  const max = center + seedAreaHalf;
+  const min = center - obj.area;
+  const max = center + obj.area;
 
   for(let k=min; k<max; k++)
     for(let j=min; j<max; j++)
@@ -368,10 +441,17 @@ function initGrid(gridRes, seedAreaHalf)
   device.queue.writeBuffer(gridBuffer[0], 0, grid);
   device.queue.writeBuffer(gridBuffer[1], 0, grid);
 
-  console.log(`${(SIMULATION_OUTPUT_OFS + simulationStep)}, initGrid, ${gridRes}, ${seedAreaHalf}`);
+  // TEMPTEMP
+  resetView();
+
+  // TEMPTEMP only for recording
+  if(simulationStep === undefined)
+    simulationStep = 0;
+
+  console.log(`GRID_EVENT: { step: ${(SIMULATION_RECORDING_OFS + simulationStep)}, obj: { gridRes: ${gridRes}, seed: ${seed}, area: ${obj.area} } },`);
 }
 
-function initRules(ruleSet)
+function setRules(obj)
 {
   const RULE_OFS = 2;
   const BIRTH_OFS = 27;
@@ -382,15 +462,15 @@ function initRules(ruleSet)
   rules[0] = 0; // automaton kind
   rules[1] = 5; // states
 
-  let id;
-  switch(ruleSet) {
+  let name;
+  switch(obj.ruleSet) {
     case 1:
-      id = "445";
+      name = "445";
       rules[RULE_OFS + 4] = 1;
       rules[RULE_OFS + BIRTH_OFS + 4] = 1;
       break;
     case 2:
-      id = "amoeba";
+      name = "amoeba";
       for(let i=9; i<27; i++)
         rules[RULE_OFS + i] = 1;
       rules[RULE_OFS + BIRTH_OFS + 5] = 1;
@@ -401,7 +481,7 @@ function initRules(ruleSet)
       rules[RULE_OFS + BIRTH_OFS + 15] = 1;
       break;
     case 3:
-      id = "pyro5"; 
+      name = "pyro5"; 
       rules[1] = 5;
       rules[RULE_OFS + 4] = 1;
       rules[RULE_OFS + 5] = 1;
@@ -412,24 +492,24 @@ function initRules(ruleSet)
       rules[RULE_OFS + BIRTH_OFS + 8] = 1;
       break;
     case 4:
-      id = "empty";
+      name = "empty";
       break;
     case 5:
-      id = "empty";
+      name = "empty";
       break;
     case 6:
-      id = "empty";
+      name = "empty";
       break;
      case 7:
-      id = "empty";
+      name = "empty";
       break;
     case 8:
-      id = "single";
+      name = "single";
       rules[1] = 2;
       rules[RULE_OFS + BIRTH_OFS + 2] = 1;
       break;
     case 9:
-      id = "clouds";
+      name = "clouds";
       rules[1] = 5;
       for(let i=13; i<27; i++)
         rules[RULE_OFS + i] = 1;
@@ -440,7 +520,7 @@ function initRules(ruleSet)
       rules[RULE_OFS + BIRTH_OFS + 19] = 1;
       break;
     case 0:
-      id = "decay";
+      name = "decay";
       rules[1] = 3;
       for(let i=13; i<27; i++)
         rules[RULE_OFS + i] = 1;
@@ -450,70 +530,89 @@ function initRules(ruleSet)
   }
 
   device.queue.writeBuffer(rulesBuffer, 0, rules);
-  
-  console.log(`${(SIMULATION_OUTPUT_OFS + simulationStep)}, initRules, ${ruleSet}, "${id}"`);
+
+  if(simulationStep === undefined)
+    simulationStep = 0;
+
+  console.log(`RULE_EVENT: { step: ${(SIMULATION_RECORDING_OFS + simulationStep)}, obj: { ruleSet: ${obj.ruleSet} } }, // ${name}`);
 }
 
-function resetView()
+function setUpdateDelta(obj)
 {
-  eye = [currGridRes, currGridRes, currGridRes];
-  eye = vec3Add(eye, vec3Scale(eye, 0.05));
-  fwd = vec3Normalize(vec3Add([currGridRes/2, currGridRes/2, currGridRes/2], vec3Negate(eye)));
+  updateDelta = obj.delta;
 
-  programmableValue = 0.0;
+  if(simulationStep === undefined)
+    simulationStep = 0;
 
-  computeView();
+  console.log(`UPDATE_DELTA_EVENT: { step: ${(SIMULATION_RECORDING_OFS + simulationStep)}, obj: { delta: ${updateDelta} } },`);
 }
 
-function computeView()
+function setView(e, f)
 {
+  eye = e;
+  fwd = f;
   right = vec3Normalize(vec3Cross(fwd, [0, 1, 0]));
   up = vec3Cross(right, fwd);
 }
 
+function resetView()
+{
+  setView([gridRes, gridRes, gridRes],
+    vec3Normalize(vec3Add(vec3Scale([gridRes, gridRes, gridRes], 0.5), vec3Negate([gridRes, gridRes, gridRes]))));
+}
+
 function handleKeyEvent(e)
 {
-  if(e.key !== " " && !isNaN(e.key))
-  {
-    initRules(parseInt(e.key));
-    return;
-  }
-
   switch (e.key) {
     case "a":
-      eye = vec3Add(eye, vec3Scale(right, -MOVE_VELOCITY));
-      computeView();
+      setView(vec3Add(eye, vec3Scale(right, -MOVE_VELOCITY)), fwd);
       break;
     case "d":
-      eye = vec3Add(eye, vec3Scale(right, MOVE_VELOCITY));
-      computeView();
+      setView(vec3Add(eye, vec3Scale(right, MOVE_VELOCITY)), fwd);
       break;
     case "w":
-      eye = vec3Add(eye, vec3Scale(fwd, MOVE_VELOCITY));
-      computeView();
+      setView(vec3Add(eye, vec3Scale(fwd, MOVE_VELOCITY)), fwd);
       break;
     case "s":
-      eye = vec3Add(eye, vec3Scale(fwd, -MOVE_VELOCITY));
-      computeView();
+      setView(vec3Add(eye, vec3Scale(fwd, -MOVE_VELOCITY)), fwd);
       break;
     case "r":
       resetView();
-      break;
-    case "i":
-      initGrid(currGridRes, 15);
-      break;
-    case "+":
-      updateDelta += updateDelta / 4;
-      break;
-    case "-":
-      updateDelta -= updateDelta / 4;
       break;
     case "p":
       createPipelines();
       break;
     case " ":
       paused = !paused;
-    break;
+      break;
+  }
+
+  if(RECORDING)
+  {
+    if(e.key !== " " && !isNaN(e.key))
+    {
+      setRules({ ruleSet: parseInt(e.key) });
+      return;
+    }
+
+    switch(e.key) {
+      case "i":
+        setGrid({ gridRes: MA_GRID_RES, seed: seed, area: 4 });
+        break;
+      case "+":
+        setUpdateDelta({ delta: Math.round(updateDelta + updateDelta / UPDATE_DELTA_CHANGE_FACTOR) });
+        break;
+      case "-":
+        setUpdateDelta({ delta: Math.round(updateDelta - updateDelta / UPDATE_DELTA_CHANGE_FACTOR) });
+        break;
+    }
+  } else {
+    switch(e.key) {
+      case "Enter":
+        start = undefined;
+        // TODO Seek audio to begin of track for proper time
+        break;
+    }
   }
 }
 
@@ -535,10 +634,7 @@ function handleMouseMoveEvent(e)
   }
 
   // Pitch locally, yaw globally to avoid unwanted roll
-  fwd = vec3Transform(fwd, axisRotation(right, pitch));
-  fwd = vec3Transform(fwd, axisRotation([0, 1, 0], yaw));
-
-  computeView();
+  setView(eye, vec3Transform(vec3Transform(fwd, axisRotation(right, pitch)), axisRotation([0, 1, 0], yaw)));
 }
 
 function handleMouseWheelEvent(e)
@@ -558,8 +654,11 @@ function startRender()
     canvas.style.top = 0;
   }
 
-  initGrid(currGridRes, 15);
-  initRules(1);
+  if(RECORDING) {
+    setGrid({ gridRes: MAX_GRID_RES, seed: seed, area: 4 });
+    setRules({ ruleSet: 1 });
+    setUpdateDelta({ delta: DEFAULT_UPDATE_DELTA });
+  }
   resetView();
 
   document.querySelector("button").removeEventListener("click", startRender);
