@@ -1,7 +1,10 @@
 const FULLSCREEN = false;
 const AUDIO = false;
-const RECORDING = true;
+
+const RECORDING = false;
 const START_PAUSED = RECORDING | false;
+const PLAY_AND_SWITCH_TO_RECORDING_AT_END = !RECORDING; // TODO
+const CIRCLING_CAMERA = true;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 1024;
@@ -12,7 +15,7 @@ const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
 
 const MAX_GRID_RES = 128;
-const DEFAULT_UPDATE_DELTA = 256;
+const DEFAULT_UPDATE_DELTA = 250;
 const SIMULATION_RECORDING_OFS = 0;
 
 const MOVE_VELOCITY = 0.75;
@@ -53,32 +56,51 @@ let simulationStep;
 let activeSimulationStep;
 
 let gridEvents = [
-{ step: 0, obj: { gridRes: 128, seed: 1880810298, area: 4 } },
+{ step: 0, obj: { gridRes: 128, seed: 3902497427, area: 4 } }, // GRID_EVENT
 ];
 
 let ruleEvents = [
-{ step: 0, obj: { ruleSet: 2 } }, // amoeba
-{ step: 91, obj: { ruleSet: 9 } }, // clouds
-{ step: 104, obj: { ruleSet: 8 } }, // single
-{ step: 110, obj: { ruleSet: 2 } }, // amoeba
-{ step: 136, obj: { ruleSet: 3 } }, // pyro5
-{ step: 149, obj: { ruleSet: 2 } }, // amoeba
-{ step: 167, obj: { ruleSet: 1 } }, // 445
-{ step: 534, obj: { ruleSet: 7 } }, // empty
+{ step: 0, obj: { ruleSet: 2 } }, // RULE_EVENT: amoeba
+{ step: 146, obj: { ruleSet: 3 } }, // RULE_EVENT: pyro5
+{ step: 162, obj: { ruleSet: 2 } }, // RULE_EVENT: amoeba
+{ step: 175, obj: { ruleSet: 9 } }, // RULE_EVENT: clouds
+{ step: 187, obj: { ruleSet: 2 } }, // RULE_EVENT: amoeba
+{ step: 211, obj: { ruleSet: 1 } }, // RULE_EVENT: 445
+{ step: 414, obj: { ruleSet: 8 } }, // RULE_EVENT: single
+{ step: 418, obj: { ruleSet: 3 } }, // RULE_EVENT: pyro5
+{ step: 426, obj: { ruleSet: 2 } }, // RULE_EVENT: amoeba
+{ step: 439, obj: { ruleSet: 9 } }, // RULE_EVENT: clouds
+{ step: 471, obj: { ruleSet: 0 } }, // RULE_EVENT: decay
+{ step: 502, obj: { ruleSet: 6 } }, // RULE_EVENT: empty
 ];
 
 let simulationSpeedEvents = [
-{ step: 0, obj: { delta: 256 } },
-{ step: 40, obj: { delta: 192 } },
-{ step: 41, obj: { delta: 144 } },
-{ step: 70, obj: { delta: 180 } },
-{ step: 70, obj: { delta: 225 } },
-{ step: 71, obj: { delta: 281 } },
-{ step: 80, obj: { delta: 351 } },
-{ step: 184, obj: { delta: 263 } },
-{ step: 185, obj: { delta: 197 } },
-{ step: 185, obj: { delta: 148 } },
-{ step: 187, obj: { delta: 111 } },
+{ step: 0, obj: { delta: 250 } }, // SPEED_EVENT
+{ step: 33, obj: { delta: 188 } }, // SPEED_EVENT
+{ step: 37, obj: { delta: 141 } }, // SPEED_EVENT
+{ step: 40, obj: { delta: 106 } }, // SPEED_EVENT
+{ step: 42, obj: { delta: 80 } }, // SPEED_EVENT
+{ step: 61, obj: { delta: 60 } }, // SPEED_EVENT
+{ step: 64, obj: { delta: 45 } }, // SPEED_EVENT
+{ step: 87, obj: { delta: 56 } }, // SPEED_EVENT
+{ step: 97, obj: { delta: 70 } }, // SPEED_EVENT
+{ step: 100, obj: { delta: 88 } }, // SPEED_EVENT
+{ step: 109, obj: { delta: 110 } }, // SPEED_EVENT
+{ step: 111, obj: { delta: 138 } }, // SPEED_EVENT
+{ step: 116, obj: { delta: 173 } }, // SPEED_EVENT
+{ step: 118, obj: { delta: 216 } }, // SPEED_EVENT
+{ step: 125, obj: { delta: 270 } }, // SPEED_EVENT
+{ step: 160, obj: { delta: 338 } }, // SPEED_EVENT
+{ step: 251, obj: { delta: 254 } }, // SPEED_EVENT
+{ step: 254, obj: { delta: 191 } }, // SPEED_EVENT
+{ step: 258, obj: { delta: 143 } }, // SPEED_EVENT
+{ step: 260, obj: { delta: 107 } }, // SPEED_EVENT
+{ step: 272, obj: { delta: 80 } }, // SPEED_EVENT
+{ step: 319, obj: { delta: 100 } }, // SPEED_EVENT
+{ step: 325, obj: { delta: 125 } }, // SPEED_EVENT
+{ step: 330, obj: { delta: 156 } }, // SPEED_EVENT
+{ step: 341, obj: { delta: 195 } }, // SPEED_EVENT
+{ step: 347, obj: { delta: 244 } }, // SPEED_EVENT
 ];
 
 let cameraEvents = [];
@@ -286,6 +308,15 @@ function render(time)
   if(!paused && !RECORDING)
     update(currTime);
 
+  // TEMPTEMPTEMP
+  if(CIRCLING_CAMERA) {
+    let speed = 0.00025;
+    let center = vec3Scale([gridRes, gridRes, gridRes], 0.5);
+    let pos = [gridRes * Math.sin(currTime * speed), 0.75 * gridRes * Math.sin(currTime * speed), gridRes * Math.cos(currTime * speed)];
+    pos = vec3Add(center, pos);
+    setView(pos, vec3Normalize(vec3Add(center, vec3Negate(pos))));
+  }
+ 
   const commandEncoder = device.createCommandEncoder();
  
   // TODO Distribute one simulation step across different frames (within updateDelta 'budget')
@@ -335,7 +366,7 @@ function update(currTime)
     updateEvents(ruleEvents, setRules);
     updateEvents(simulationSpeedEvents, setUpdateDelta);
 
-    // TODO Camera update
+    // TODO Implement actual camera handling/updates here
   }
 
   activeSimulationStep = simulationStep;
@@ -448,7 +479,7 @@ function setGrid(obj)
   if(simulationStep === undefined)
     simulationStep = 0;
 
-  console.log(`GRID_EVENT: { step: ${(SIMULATION_RECORDING_OFS + simulationStep)}, obj: { gridRes: ${gridRes}, seed: ${seed}, area: ${obj.area} } },`);
+  console.log(`{ step: ${(SIMULATION_RECORDING_OFS + simulationStep)}, obj: { gridRes: ${gridRes}, seed: ${seed}, area: ${obj.area} } }, // GRID_EVENT`);
 }
 
 function setRules(obj)
@@ -459,8 +490,8 @@ function setRules(obj)
   for(let i=0; i<rules.length; i++)
     rules[i] = 0;
 
-  rules[0] = 0; // automaton kind
-  rules[1] = 5; // states
+  rules[0] = 0; // automaton kind (not used at the moment)
+  rules[1] = 5; // number of states
 
   let name;
   switch(obj.ruleSet) {
@@ -520,6 +551,7 @@ function setRules(obj)
       rules[RULE_OFS + BIRTH_OFS + 19] = 1;
       break;
     case 0:
+      // TODO Currently not working as expected
       name = "decay";
       rules[1] = 3;
       for(let i=13; i<27; i++)
@@ -534,7 +566,7 @@ function setRules(obj)
   if(simulationStep === undefined)
     simulationStep = 0;
 
-  console.log(`RULE_EVENT: { step: ${(SIMULATION_RECORDING_OFS + simulationStep)}, obj: { ruleSet: ${obj.ruleSet} } }, // ${name}`);
+  console.log(`{ step: ${(SIMULATION_RECORDING_OFS + simulationStep)}, obj: { ruleSet: ${obj.ruleSet} } }, // RULE_EVENT: ${name}`);
 }
 
 function setUpdateDelta(obj)
@@ -544,7 +576,7 @@ function setUpdateDelta(obj)
   if(simulationStep === undefined)
     simulationStep = 0;
 
-  console.log(`UPDATE_DELTA_EVENT: { step: ${(SIMULATION_RECORDING_OFS + simulationStep)}, obj: { delta: ${updateDelta} } },`);
+  console.log(`{ step: ${(SIMULATION_RECORDING_OFS + simulationStep)}, obj: { delta: ${updateDelta} } }, // SPEED_EVENT`);
 }
 
 function setView(e, f)
@@ -580,6 +612,7 @@ function handleKeyEvent(e)
       resetView();
       break;
     case "p":
+      // Reload shader
       createPipelines();
       break;
     case " ":
@@ -597,7 +630,7 @@ function handleKeyEvent(e)
 
     switch(e.key) {
       case "i":
-        setGrid({ gridRes: MA_GRID_RES, seed: seed, area: 4 });
+        setGrid({ gridRes: MAX_GRID_RES, seed: seed, area: 4 });
         break;
       case "+":
         setUpdateDelta({ delta: Math.round(updateDelta + updateDelta / UPDATE_DELTA_CHANGE_FACTOR) });
@@ -656,7 +689,7 @@ function startRender()
 
   if(RECORDING) {
     setGrid({ gridRes: MAX_GRID_RES, seed: seed, area: 4 });
-    setRules({ ruleSet: 1 });
+    setRules({ ruleSet: 2 });
     setUpdateDelta({ delta: DEFAULT_UPDATE_DELTA });
   }
   resetView();

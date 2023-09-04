@@ -248,6 +248,7 @@ fn shade(pos: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> vec3f
 
 fn background(ori: vec3f, dir: vec3f) -> vec3f
 {
+  // TODO Make much better background
   let a = (1.01 - (0.4 + dir.y * 0.6));
   return vec3f(0.00003) / (a * a); 
 }
