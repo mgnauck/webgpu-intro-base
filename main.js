@@ -2,9 +2,9 @@ const FULLSCREEN = false;
 const AUDIO = false;
 
 const RECORDING = false;
-const START_PAUSED = RECORDING | false;
-const PLAY_AND_SWITCH_TO_RECORDING_AT_END = !RECORDING; // TODO
-const CIRCLING_CAMERA = true;
+const PAUSE_AND_RECORD_AT = -1; // Simulation step where we stop playin and switch into recoding mode
+const START_PAUSED = RECORDING | (PAUSE_AND_RECORD_AT == 0);
+const OVERVIEW_CAMERA = true;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 1024;
@@ -16,7 +16,7 @@ const AUDIO_HEIGHT = 4096;
 
 const MAX_GRID_RES = 128;
 const DEFAULT_UPDATE_DELTA = 250;
-const SIMULATION_RECORDING_OFS = 0;
+const RECORDING_OFS = 0;
 
 const MOVE_VELOCITY = 0.75;
 const LOOK_VELOCITY = 0.025;
@@ -41,6 +41,7 @@ let context;
 
 let right, up, fwd, eye;
 let programmableValue;
+let overviewCamera = OVERVIEW_CAMERA;
 
 let seed = Math.floor(Math.random() * 4294967296);
 let rand;
@@ -49,58 +50,74 @@ let grid;
 let updateDelta;
 let rules;
 
-let start;
 let paused = START_PAUSED;
+let recording = RECORDING;
+let start;
 let lastSimulationUpdate;
 let simulationStep;
 let activeSimulationStep;
 
 let gridEvents = [
-{ step: 0, obj: { gridRes: 128, seed: 3902497427, area: 4 } }, // GRID_EVENT
+{ step: 0, obj: { gridRes: 128, seed: 321940067, area: 4 } }, // GRID_EVENT
 ];
 
 let ruleEvents = [
 { step: 0, obj: { ruleSet: 2 } }, // RULE_EVENT: amoeba
-{ step: 146, obj: { ruleSet: 3 } }, // RULE_EVENT: pyro5
-{ step: 162, obj: { ruleSet: 2 } }, // RULE_EVENT: amoeba
-{ step: 175, obj: { ruleSet: 9 } }, // RULE_EVENT: clouds
-{ step: 187, obj: { ruleSet: 2 } }, // RULE_EVENT: amoeba
-{ step: 211, obj: { ruleSet: 1 } }, // RULE_EVENT: 445
-{ step: 414, obj: { ruleSet: 8 } }, // RULE_EVENT: single
-{ step: 418, obj: { ruleSet: 3 } }, // RULE_EVENT: pyro5
-{ step: 426, obj: { ruleSet: 2 } }, // RULE_EVENT: amoeba
-{ step: 439, obj: { ruleSet: 9 } }, // RULE_EVENT: clouds
-{ step: 471, obj: { ruleSet: 0 } }, // RULE_EVENT: decay
-{ step: 502, obj: { ruleSet: 6 } }, // RULE_EVENT: empty
+{ step: 187, obj: { ruleSet: 3 } }, // RULE_EVENT: pyro
+{ step: 233, obj: { ruleSet: 2 } }, // RULE_EVENT: amoeba
+{ step: 278, obj: { ruleSet: 9 } }, // RULE_EVENT: clouds
+{ step: 296, obj: { ruleSet: 2 } }, // RULE_EVENT: amoeba
+{ step: 308, obj: { ruleSet: 4 } }, // RULE_EVENT: grids
+{ step: 540, obj: { ruleSet: 1 } }, // RULE_EVENT: 445
+{ step: 887, obj: { ruleSet: 7 } }, // RULE_EVENT: empty
+{ step: 887, obj: { ruleSet: 8 } }, // RULE_EVENT: single
+{ step: 895, obj: { ruleSet: 3 } }, // RULE_EVENT: pyro
+{ step: 895, obj: { ruleSet: 4 } }, // RULE_EVENT: grids
+{ step: 903, obj: { ruleSet: 2 } }, // RULE_EVENT: amoeba
+{ step: 948, obj: { ruleSet: 8 } }, // RULE_EVENT: single
+{ step: 960, obj: { ruleSet: 2 } }, // RULE_EVENT: amoeba
+{ step: 977, obj: { ruleSet: 9 } }, // RULE_EVENT: clouds
+{ step: 1003, obj: { ruleSet: 0 } }, // RULE_EVENT: decay
+{ step: 1058, obj: { ruleSet: 6 } }, // RULE_EVENT: empty
 ];
 
 let simulationSpeedEvents = [
 { step: 0, obj: { delta: 250 } }, // SPEED_EVENT
-{ step: 33, obj: { delta: 188 } }, // SPEED_EVENT
-{ step: 37, obj: { delta: 141 } }, // SPEED_EVENT
-{ step: 40, obj: { delta: 106 } }, // SPEED_EVENT
-{ step: 42, obj: { delta: 80 } }, // SPEED_EVENT
-{ step: 61, obj: { delta: 60 } }, // SPEED_EVENT
-{ step: 64, obj: { delta: 45 } }, // SPEED_EVENT
-{ step: 87, obj: { delta: 56 } }, // SPEED_EVENT
-{ step: 97, obj: { delta: 70 } }, // SPEED_EVENT
-{ step: 100, obj: { delta: 88 } }, // SPEED_EVENT
-{ step: 109, obj: { delta: 110 } }, // SPEED_EVENT
-{ step: 111, obj: { delta: 138 } }, // SPEED_EVENT
-{ step: 116, obj: { delta: 173 } }, // SPEED_EVENT
-{ step: 118, obj: { delta: 216 } }, // SPEED_EVENT
-{ step: 125, obj: { delta: 270 } }, // SPEED_EVENT
-{ step: 160, obj: { delta: 338 } }, // SPEED_EVENT
-{ step: 251, obj: { delta: 254 } }, // SPEED_EVENT
-{ step: 254, obj: { delta: 191 } }, // SPEED_EVENT
-{ step: 258, obj: { delta: 143 } }, // SPEED_EVENT
-{ step: 260, obj: { delta: 107 } }, // SPEED_EVENT
-{ step: 272, obj: { delta: 80 } }, // SPEED_EVENT
-{ step: 319, obj: { delta: 100 } }, // SPEED_EVENT
-{ step: 325, obj: { delta: 125 } }, // SPEED_EVENT
-{ step: 330, obj: { delta: 156 } }, // SPEED_EVENT
-{ step: 341, obj: { delta: 195 } }, // SPEED_EVENT
-{ step: 347, obj: { delta: 244 } }, // SPEED_EVENT
+{ step: 29, obj: { delta: 188 } }, // SPEED_EVENT
+{ step: 30, obj: { delta: 141 } }, // SPEED_EVENT
+{ step: 31, obj: { delta: 106 } }, // SPEED_EVENT
+{ step: 33, obj: { delta: 80 } }, // SPEED_EVENT
+{ step: 41, obj: { delta: 60 } }, // SPEED_EVENT
+{ step: 44, obj: { delta: 45 } }, // SPEED_EVENT
+{ step: 120, obj: { delta: 56 } }, // SPEED_EVENT
+{ step: 124, obj: { delta: 70 } }, // SPEED_EVENT
+{ step: 130, obj: { delta: 88 } }, // SPEED_EVENT
+{ step: 135, obj: { delta: 110 } }, // SPEED_EVENT
+{ step: 143, obj: { delta: 138 } }, // SPEED_EVENT
+{ step: 145, obj: { delta: 173 } }, // SPEED_EVENT
+{ step: 161, obj: { delta: 216 } }, // SPEED_EVENT
+{ step: 366, obj: { delta: 162 } }, // SPEED_EVENT
+{ step: 376, obj: { delta: 122 } }, // SPEED_EVENT
+{ step: 389, obj: { delta: 92 } }, // SPEED_EVENT
+{ step: 443, obj: { delta: 69 } }, // SPEED_EVENT
+{ step: 499, obj: { delta: 86 } }, // SPEED_EVENT
+{ step: 501, obj: { delta: 108 } }, // SPEED_EVENT
+{ step: 502, obj: { delta: 135 } }, // SPEED_EVENT
+{ step: 503, obj: { delta: 169 } }, // SPEED_EVENT
+{ step: 508, obj: { delta: 211 } }, // SPEED_EVENT
+{ step: 511, obj: { delta: 264 } }, // SPEED_EVENT
+{ step: 570, obj: { delta: 198 } }, // SPEED_EVENT
+{ step: 577, obj: { delta: 149 } }, // SPEED_EVENT
+{ step: 578, obj: { delta: 112 } }, // SPEED_EVENT
+{ step: 580, obj: { delta: 84 } }, // SPEED_EVENT
+{ step: 631, obj: { delta: 63 } }, // SPEED_EVENT
+{ step: 634, obj: { delta: 47 } }, // SPEED_EVENT
+{ step: 735, obj: { delta: 59 } }, // SPEED_EVENT
+{ step: 738, obj: { delta: 74 } }, // SPEED_EVENT
+{ step: 742, obj: { delta: 93 } }, // SPEED_EVENT
+{ step: 745, obj: { delta: 116 } }, // SPEED_EVENT
+{ step: 748, obj: { delta: 145 } }, // SPEED_EVENT
+{ step: 775, obj: { delta: 181 } }, // SPEED_EVENT
 ];
 
 let cameraEvents = [];
@@ -305,11 +322,11 @@ function render(time)
   if(paused)
     lastSimulationUpdate = currTime;
 
-  if(!paused && !RECORDING)
+  if(!paused && !recording)
     update(currTime);
 
   // TEMPTEMPTEMP
-  if(CIRCLING_CAMERA) {
+  if(overviewCamera) {
     let speed = 0.00025;
     let center = vec3Scale([gridRes, gridRes, gridRes], 0.5);
     let pos = [gridRes * Math.sin(currTime * speed), 0.75 * gridRes * Math.sin(currTime * speed), gridRes * Math.cos(currTime * speed)];
@@ -360,6 +377,12 @@ function updateEvents(events, updateFunction)
 
 function update(currTime)
 {
+  if(simulationStep == PAUSE_AND_RECORD_AT) {
+    recording = true;
+    paused = true;
+    return;
+  }
+
   if(simulationStep > activeSimulationStep)
   {
     updateEvents(gridEvents, setGrid);
@@ -479,7 +502,7 @@ function setGrid(obj)
   if(simulationStep === undefined)
     simulationStep = 0;
 
-  console.log(`{ step: ${(SIMULATION_RECORDING_OFS + simulationStep)}, obj: { gridRes: ${gridRes}, seed: ${seed}, area: ${obj.area} } }, // GRID_EVENT`);
+  console.log(`{ step: ${(RECORDING_OFS + simulationStep)}, obj: { gridRes: ${gridRes}, seed: ${seed}, area: ${obj.area} } }, // GRID_EVENT`);
 }
 
 function setRules(obj)
@@ -512,8 +535,8 @@ function setRules(obj)
       rules[RULE_OFS + BIRTH_OFS + 15] = 1;
       break;
     case 3:
-      name = "pyro5"; 
-      rules[1] = 5;
+      name = "pyro"; 
+      rules[1] = 10;
       rules[RULE_OFS + 4] = 1;
       rules[RULE_OFS + 5] = 1;
       rules[RULE_OFS + 6] = 1;
@@ -523,7 +546,11 @@ function setRules(obj)
       rules[RULE_OFS + BIRTH_OFS + 8] = 1;
       break;
     case 4:
-      name = "empty";
+      name = "grids";
+      rules[1] = 4;
+      for(let i=7; i<27; i++)
+        rules[RULE_OFS + i] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 4] = 1;
       break;
     case 5:
       name = "empty";
@@ -541,7 +568,6 @@ function setRules(obj)
       break;
     case 9:
       name = "clouds";
-      rules[1] = 5;
       for(let i=13; i<27; i++)
         rules[RULE_OFS + i] = 1;
       rules[RULE_OFS + BIRTH_OFS + 13] = 1;
@@ -551,13 +577,15 @@ function setRules(obj)
       rules[RULE_OFS + BIRTH_OFS + 19] = 1;
       break;
     case 0:
-      // TODO Currently not working as expected
       name = "decay";
-      rules[1] = 3;
-      for(let i=13; i<27; i++)
+      rules[RULE_OFS + 1] = 1;
+      rules[RULE_OFS + 4] = 1;
+      rules[RULE_OFS + 8] = 1;
+      rules[RULE_OFS + 11] = 1;
+      for(let i=13; i<27; i++) {
         rules[RULE_OFS + i] = 1;
-      for(let i=10; i<27; i++)
         rules[RULE_OFS + BIRTH_OFS + i] = 1;
+      }
       break;
   }
 
@@ -566,7 +594,7 @@ function setRules(obj)
   if(simulationStep === undefined)
     simulationStep = 0;
 
-  console.log(`{ step: ${(SIMULATION_RECORDING_OFS + simulationStep)}, obj: { ruleSet: ${obj.ruleSet} } }, // RULE_EVENT: ${name}`);
+  console.log(`{ step: ${(RECORDING_OFS + simulationStep)}, obj: { ruleSet: ${obj.ruleSet} } }, // RULE_EVENT: ${name}`);
 }
 
 function setUpdateDelta(obj)
@@ -576,7 +604,7 @@ function setUpdateDelta(obj)
   if(simulationStep === undefined)
     simulationStep = 0;
 
-  console.log(`{ step: ${(SIMULATION_RECORDING_OFS + simulationStep)}, obj: { delta: ${updateDelta} } }, // SPEED_EVENT`);
+  console.log(`{ step: ${(RECORDING_OFS + simulationStep)}, obj: { delta: ${updateDelta} } }, // SPEED_EVENT`);
 }
 
 function setView(e, f)
@@ -611,6 +639,12 @@ function handleKeyEvent(e)
     case "r":
       resetView();
       break;
+    case "c":
+      overviewCamera = !overviewCamera;
+      break;
+    case "o":
+      recording = !recording;
+      break;
     case "p":
       // Reload shader
       createPipelines();
@@ -620,7 +654,7 @@ function handleKeyEvent(e)
       break;
   }
 
-  if(RECORDING)
+  if(recording)
   {
     if(e.key !== " " && !isNaN(e.key))
     {
@@ -642,6 +676,7 @@ function handleKeyEvent(e)
   } else {
     switch(e.key) {
       case "Enter":
+        // Reset simulation steps back to start
         start = undefined;
         // TODO Seek audio to begin of track for proper time
         break;
@@ -687,7 +722,7 @@ function startRender()
     canvas.style.top = 0;
   }
 
-  if(RECORDING) {
+  if(recording) {
     setGrid({ gridRes: MAX_GRID_RES, seed: seed, area: 4 });
     setRules({ ruleSet: 2 });
     setUpdateDelta({ delta: DEFAULT_UPDATE_DELTA });

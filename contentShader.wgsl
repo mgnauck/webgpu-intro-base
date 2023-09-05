@@ -56,7 +56,7 @@ fn minComp(v: vec3f) -> f32
 fn getCell(x: i32, y: i32, z: i32) -> u32
 {
   // Consider only states 0 and 1. Cells in refactory period do NOT count as active neighbours, i.e. are counted as 0.
-  return 1 - min(abs(1 - grid.arr[grid.mul.z * z + grid.mul.y * y + x]), 1);
+  return u32(1 - min(abs(1 - i32(grid.arr[grid.mul.z * z + grid.mul.y * y + x])), 1));
 }
 
 fn getNeumannNeighbourCountWrap(pos: vec3i) -> u32
@@ -117,12 +117,18 @@ fn evalMultiState(pos: vec3i, states: u32)
       outputGrid.arr[index] = rules.arr[27 + getMooreNeighbourCountWrap(pos)];
     }
     case 1: {
-      // Dying state 1 goes to 2
+      // Dying state 1 goes to 2 (or dies directly by being moduloed to 0, in case there are only 2 states)
       outputGrid.arr[index] = (1 + 1 - rules.arr[getMooreNeighbourCountWrap(pos)]) % rules.states;
     }
     default {
       // Refactory period
-      outputGrid.arr[index] = min(value + 1, rules.states) % rules.states; 
+      var v = value + 1;
+      if(value >= rules.states) {
+        v = 0;
+      }
+      outputGrid.arr[index] = v;
+      // TODO Below code should be the same as above. Think about it once more!
+      //outputGrid.arr[index] = (min(value, rules.states - 1) + 1) % rules.states; 
     }
   }
 }
