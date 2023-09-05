@@ -15,6 +15,7 @@ fn sine(phase: f32) -> f32 {
 }
 
 fn rand(co: vec2f) -> f32 {
+  // Bad rand, ripped from somewhere
   return fract(sin(dot(co, vec2f(12.9898, 78.233))) * 43758.5453);
 }
 
@@ -29,29 +30,36 @@ fn kick(time: f32) -> f32 {
   return amp * sine(phase);
 }
 
-fn hiHat(time: f32) -> vec2f {
+fn hiHat(time: f32) -> f32 {
   let amp = exp(-40.0 * time);
-  return amp * noise(time * 110.0).xy;
+  return amp * noise(time * 110.0).x;
 }
 
 @group(0) @binding(0) var outputTexture: texture_storage_2d<rg32float, write>;
 
 @compute @workgroup_size(8, 8)
-fn c(@builtin(global_invocation_id) globalId: vec3u) {
+fn audioMain(@builtin(global_invocation_id) globalId: vec3u) {
   
   if (globalId.x >= 4096 || globalId.y >= 4096) {
     return;
   }
 
+  // Calculate current time (= current sample) from x/y of our buffer
   let time = f32(4096 * globalId.y + globalId.x) / 44100.0;
   let beat = timeToBeat(time);
 
-  var res = vec2f(0.6 * kick(beatToTime(beat % 1.0)));
+  // At the moment samples are calculated in mono and then written to left/right
 
-  res += 0.3 * hiHat(beatToTime((beat + 0.5) % 1.0));
+  // Kick
+  var result = vec2f(0.6 * kick(beatToTime(beat % 1.0)));
+
+  // Hihat
+  result += vec2f(0.3 * hiHat(beatToTime((beat + 0.5) % 1.0)));
 
   textureStore(
     outputTexture,
+    // Position in output buffer
     vec2u(globalId.x, globalId.y),
-    vec4f(clamp(res, vec2f(-1), vec2f(1)), 0, 1));
+    // Write 2 floats between -1 and 1 to output buffer (stereo)
+    vec4f(clamp(result, vec2f(-1), vec2f(1)), 0, 1));
 }

@@ -138,28 +138,28 @@ function loadTextFile(url)
   return fetch(url).then(response => response.text());
 }
 
-async function createComputePipeline(shaderModule, pipelineLayout)
+async function createComputePipeline(shaderModule, pipelineLayout, entryPoint)
 {
   return device.createComputePipelineAsync({
     layout: pipelineLayout,
     compute: {
       module: shaderModule,
-      entryPoint: "c"
+      entryPoint: entryPoint
     }
   });
 }
 
-async function createRenderPipeline(shaderModule, pipelineLayout)
+async function createRenderPipeline(shaderModule, pipelineLayout, vertexEntryPoint, fragmentEntryPoint)
 {
   return device.createRenderPipelineAsync({
     layout: pipelineLayout,
     vertex: {
       module: shaderModule,
-      entryPoint: "v"
+      entryPoint: vertexEntryPoint
     },
     fragment: {
       module: shaderModule,
-      entryPoint: "f",
+      entryPoint: fragmentEntryPoint,
       targets: [{format: "bgra8unorm"}]
     },
     primitive: {topology: "triangle-strip"}
@@ -225,7 +225,7 @@ async function prepareAudio()
 
   const commandEncoder = device.createCommandEncoder();
   
-  encodeComputePassAndSubmit(commandEncoder, await createComputePipeline(shaderModule, pipelineLayout),
+  encodeComputePassAndSubmit(commandEncoder, await createComputePipeline(shaderModule, pipelineLayout, "audioMain"),
       bindGroup, Math.ceil(AUDIO_WIDTH / 8), Math.ceil(AUDIO_HEIGHT / 8), 1);
 
   commandEncoder.copyTextureToBuffer(
@@ -304,8 +304,8 @@ async function createPipelines()
   let shaderCode = await loadTextFile("contentShader.wgsl");
   let shaderModule = device.createShaderModule({code: shaderCode});
 
-  computePipeline = await createComputePipeline(shaderModule, pipelineLayout);
-  renderPipeline = await createRenderPipeline(shaderModule, pipelineLayout);
+  computePipeline = await createComputePipeline(shaderModule, pipelineLayout, "computeMain");
+  renderPipeline = await createRenderPipeline(shaderModule, pipelineLayout, "vertexMain", "fragmentMain");
 }
 
 function render(time)

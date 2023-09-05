@@ -134,7 +134,7 @@ fn evalMultiState(pos: vec3i, states: u32)
 }
 
 @compute @workgroup_size(4,4,4)
-fn c(@builtin(global_invocation_id) globalId: vec3u)
+fn computeMain(@builtin(global_invocation_id) globalId: vec3u)
 {
   switch(rules.kind) {
     case 1: {
@@ -260,14 +260,14 @@ fn background(ori: vec3f, dir: vec3f) -> vec3f
 }
 
 @vertex
-fn v(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f
+fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f
 {
   let pos = array<vec2f, 4>(vec2f(-1, 1), vec2f(-1, -1), vec2f(1), vec2f(1, -1));
   return vec4f(pos[vertexIndex], 0, 1);
 }
 
 @fragment
-fn f(@builtin(position) position: vec4f) -> @location(0) vec4f
+fn fragmentMain(@builtin(position) position: vec4f) -> @location(0) vec4f
 {
   // Framebuffer y-down in webgpu
   let origin = uniforms.eye;
