@@ -239,13 +239,13 @@ fn shade(pos: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> vec3f
   // Position in cube and z-distance with sky and state
   let col = pos / f32(grid.mul.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
 
-/*
+  /*
   // Distance from center into palette scaled by state and dist
   let halfGrid = f32(grid.mul.y) * 0.5;
   let v = pos - vec3f(halfGrid);
   let centerDist = length(v) / halfGrid;
   let col = palette(centerDist, vec3f(0.1), vec3f(0.2), vec3f(0.3), vec3f(0.1, 0.3, 0.6)) * val * val * 0.3 * exp(-3 * (*hit).dist / (*hit).maxDist);
-*/
+  */
 
   let occ = calcOcclusion(pos, (*hit).index, vec3i((*hit).norm));
   return col * occ * occ * occ;

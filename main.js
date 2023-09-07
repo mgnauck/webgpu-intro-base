@@ -1,5 +1,5 @@
-const FULLSCREEN = true;
-const AUDIO = true;
+const FULLSCREEN = false;
+const AUDIO = false;
 
 const RECORDING = false;
 const RECORDING_OFS = 0;
