@@ -1,9 +1,9 @@
-const FULLSCREEN = false;
-const AUDIO = false;
+const FULLSCREEN = true;
+const AUDIO = true;
 
 const RECORDING = false;
-const PAUSE_AND_RECORD_AT = -1; // Simulation step where we stop playin and switch into recoding mode
-const START_PAUSED = RECORDING | (PAUSE_AND_RECORD_AT == 0);
+const RECORDING_OFS = 0;
+const START_RECORDING_AT = -1;
 const OVERVIEW_CAMERA = true;
 
 const ASPECT = 1.6;
@@ -15,13 +15,14 @@ const AUDIO_WIDTH = 4096;
 const AUDIO_HEIGHT = 4096;
 
 const MAX_GRID_RES = 128;
-const DEFAULT_UPDATE_DELTA = 250;
-const RECORDING_OFS = 0;
+const DEFAULT_UPDATE_DELAY = 250;
 
 const MOVE_VELOCITY = 0.75;
 const LOOK_VELOCITY = 0.025;
 const WHEEL_VELOCITY = 0.005;
-const UPDATE_DELTA_CHANGE_FACTOR = 4;
+
+let idle = RECORDING;
+let recording = RECORDING;
 
 let audioContext;
 let audioBufferSourceNode;
@@ -47,81 +48,54 @@ let seed = Math.floor(Math.random() * 4294967296);
 let rand;
 let gridRes;
 let grid;
-let updateDelta;
+let updateDelay = DEFAULT_UPDATE_DELAY;
 let rules;
 
-let paused = START_PAUSED;
-let recording = RECORDING;
-let start;
-let lastSimulationUpdate;
-let simulationStep;
-let activeSimulationStep;
+let startTime;
+let lastSimulationUpdateTime = 0;
+let simulationPaused = false;
+let simulationStep = 0;
+let previousSimulationStep = -1;
+let simulationIteration = 0;
 
-let gridEvents = [
-{ step: 0, obj: { gridRes: 128, seed: 321940067, area: 4 } }, // GRID_EVENT
+const GRID_EVENTS = [
+{ step: 0, obj: { gridRes: 128, seed: 1464541643, area: 4 } }, // GRID_EVENT
 ];
 
-let ruleEvents = [
-{ step: 0, obj: { ruleSet: 2 } }, // RULE_EVENT: amoeba
-{ step: 187, obj: { ruleSet: 3 } }, // RULE_EVENT: pyro
-{ step: 233, obj: { ruleSet: 2 } }, // RULE_EVENT: amoeba
-{ step: 278, obj: { ruleSet: 9 } }, // RULE_EVENT: clouds
-{ step: 296, obj: { ruleSet: 2 } }, // RULE_EVENT: amoeba
-{ step: 308, obj: { ruleSet: 4 } }, // RULE_EVENT: grids
-{ step: 540, obj: { ruleSet: 1 } }, // RULE_EVENT: 445
-{ step: 887, obj: { ruleSet: 7 } }, // RULE_EVENT: empty
-{ step: 887, obj: { ruleSet: 8 } }, // RULE_EVENT: single
-{ step: 895, obj: { ruleSet: 3 } }, // RULE_EVENT: pyro
-{ step: 895, obj: { ruleSet: 4 } }, // RULE_EVENT: grids
-{ step: 903, obj: { ruleSet: 2 } }, // RULE_EVENT: amoeba
-{ step: 948, obj: { ruleSet: 8 } }, // RULE_EVENT: single
-{ step: 960, obj: { ruleSet: 2 } }, // RULE_EVENT: amoeba
-{ step: 977, obj: { ruleSet: 9 } }, // RULE_EVENT: clouds
-{ step: 1003, obj: { ruleSet: 0 } }, // RULE_EVENT: decay
-{ step: 1058, obj: { ruleSet: 6 } }, // RULE_EVENT: empty
+const RULE_EVENTS = [
+{ step: 0, obj: { ruleSet: 2 } }, // RULE_EVENT (amoeba, states: 5)
+{ step: 0, obj: { ruleSet: 7 } }, // RULE_EVENT (shell, states: 2)
+{ step: 14, obj: { ruleSet: 5 } }, // RULE_EVENT (coral, states: 4)
+{ step: 29, obj: { ruleSet: 6 } }, // RULE_EVENT (crystal, states: 5)
+{ step: 34, obj: { ruleSet: 3 } }, // RULE_EVENT (pyro, states: 10)
+{ step: 46, obj: { ruleSet: 9 } }, // RULE_EVENT (pulse, states: 10)
+{ step: 52, obj: { ruleSet: 2 } }, // RULE_EVENT (amoeba, states: 5)
+{ step: 67, obj: { ruleSet: 6 } }, // RULE_EVENT (crystal, states: 5)
+{ step: 71, obj: { ruleSet: 7 } }, // RULE_EVENT (shell, states: 2)
+{ step: 77, obj: { ruleSet: 0 } }, // RULE_EVENT (clouds, states: 5)
+{ step: 112, obj: { ruleSet: 4 } }, // RULE_EVENT (framework, states: 4)
+{ step: 158, obj: { ruleSet: 1 } }, // RULE_EVENT (445, states: 5)
+{ step: 183, obj: { ruleSet: 9 } }, // RULE_EVENT (pulse, states: 10)
+{ step: 194, obj: { ruleSet: 6 } }, // RULE_EVENT (crystal, states: 5)
+{ step: 198, obj: { ruleSet: 8 } }, // RULE_EVENT (shell, states: 5)
+{ step: 208, obj: { ruleSet: 3 } }, // RULE_EVENT (pyro, states: 10)
+{ step: 227, obj: { ruleSet: 2 } }, // RULE_EVENT (amoeba, states: 5)
+{ step: 236, obj: { ruleSet: 9 } }, // RULE_EVENT (pulse, states: 10)
+{ step: 241, obj: { ruleSet: 5 } }, // RULE_EVENT (coral, states: 4)
+{ step: 271, obj: { ruleSet: 3 } }, // RULE_EVENT (pyro, states: 10)
+{ step: 284, obj: { ruleSet: 2 } }, // RULE_EVENT (amoeba, states: 5)
+{ step: 296, obj: { ruleSet: 1 } }, // RULE_EVENT (445, states: 5)
+{ step: 420, obj: { ruleSet: 4 } }, // RULE_EVENT (framework, states: 4)
 ];
 
-let simulationSpeedEvents = [
-{ step: 0, obj: { delta: 250 } }, // SPEED_EVENT
-{ step: 29, obj: { delta: 188 } }, // SPEED_EVENT
-{ step: 30, obj: { delta: 141 } }, // SPEED_EVENT
-{ step: 31, obj: { delta: 106 } }, // SPEED_EVENT
-{ step: 33, obj: { delta: 80 } }, // SPEED_EVENT
-{ step: 41, obj: { delta: 60 } }, // SPEED_EVENT
-{ step: 44, obj: { delta: 45 } }, // SPEED_EVENT
-{ step: 120, obj: { delta: 56 } }, // SPEED_EVENT
-{ step: 124, obj: { delta: 70 } }, // SPEED_EVENT
-{ step: 130, obj: { delta: 88 } }, // SPEED_EVENT
-{ step: 135, obj: { delta: 110 } }, // SPEED_EVENT
-{ step: 143, obj: { delta: 138 } }, // SPEED_EVENT
-{ step: 145, obj: { delta: 173 } }, // SPEED_EVENT
-{ step: 161, obj: { delta: 216 } }, // SPEED_EVENT
-{ step: 366, obj: { delta: 162 } }, // SPEED_EVENT
-{ step: 376, obj: { delta: 122 } }, // SPEED_EVENT
-{ step: 389, obj: { delta: 92 } }, // SPEED_EVENT
-{ step: 443, obj: { delta: 69 } }, // SPEED_EVENT
-{ step: 499, obj: { delta: 86 } }, // SPEED_EVENT
-{ step: 501, obj: { delta: 108 } }, // SPEED_EVENT
-{ step: 502, obj: { delta: 135 } }, // SPEED_EVENT
-{ step: 503, obj: { delta: 169 } }, // SPEED_EVENT
-{ step: 508, obj: { delta: 211 } }, // SPEED_EVENT
-{ step: 511, obj: { delta: 264 } }, // SPEED_EVENT
-{ step: 570, obj: { delta: 198 } }, // SPEED_EVENT
-{ step: 577, obj: { delta: 149 } }, // SPEED_EVENT
-{ step: 578, obj: { delta: 112 } }, // SPEED_EVENT
-{ step: 580, obj: { delta: 84 } }, // SPEED_EVENT
-{ step: 631, obj: { delta: 63 } }, // SPEED_EVENT
-{ step: 634, obj: { delta: 47 } }, // SPEED_EVENT
-{ step: 735, obj: { delta: 59 } }, // SPEED_EVENT
-{ step: 738, obj: { delta: 74 } }, // SPEED_EVENT
-{ step: 742, obj: { delta: 93 } }, // SPEED_EVENT
-{ step: 745, obj: { delta: 116 } }, // SPEED_EVENT
-{ step: 748, obj: { delta: 145 } }, // SPEED_EVENT
-{ step: 775, obj: { delta: 181 } }, // SPEED_EVENT
+const TIME_EVENTS = [
+{ step: 296, obj: { delta: -50 } }, // TIME_EVENT (paused: false, updateDelay: 200
+{ step: 297, obj: { delta: -50 } }, // TIME_EVENT (paused: false, updateDelay: 150
+{ step: 298, obj: { delta: -50 } }, // TIME_EVENT (paused: false, updateDelay: 100
+{ step: 299, obj: { delta: -50 } }, // TIME_EVENT (paused: false, updateDelay: 100
 ];
 
-let cameraEvents = [];
-let fadeEvents = [];
+const CAMERA_EVENTS = [];
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
 function splitmix32(a) {
@@ -218,7 +192,7 @@ async function prepareAudio()
     size: AUDIO_WIDTH * AUDIO_HEIGHT * 2 * 4
   });
 
-  setPerformanceTimer("Audio");
+  setPerformanceTimer();
 
   let shaderModule = device.createShaderModule({code: await loadTextFile("audioShader.wgsl")});
   let pipelineLayout = device.createPipelineLayout({bindGroupLayouts: [bindGroupLayout]});
@@ -310,39 +284,38 @@ async function createPipelines()
 
 function render(time)
 {
-  if(start === undefined) {
-    start = AUDIO ? (audioContext.currentTime * 1000.0) : time;
-    lastSimulationUpdate = 0;
+  if(startTime === undefined) {
+    startTime = AUDIO ? (audioContext.currentTime * 1000.0) : time;
+    
+    lastSimulationUpdateTime = 0;
+    simulationPaused = false;
     simulationStep = 0;
-    activeSimulationStep = -1;
+    previousSimulationStep = -1;
+    simulationIteration = 0;
   }
 
-  const currTime = AUDIO ? (audioContext.currentTime * 1000.0) : (time - start); 
+  const currTime = AUDIO ? (audioContext.currentTime * 1000.0) : (time - startTime);
 
-  if(paused)
-    lastSimulationUpdate = currTime;
+  if(idle)
+    lastSimulationUpdateTime = currTime;
 
-  if(!paused && !recording)
-    update(currTime);
+  if(!idle && !recording)
+    update();
 
-  // TEMPTEMPTEMP
-  if(overviewCamera) {
-    let speed = 0.00025;
-    let center = vec3Scale([gridRes, gridRes, gridRes], 0.5);
-    let pos = [gridRes * Math.sin(currTime * speed), 0.75 * gridRes * Math.sin(currTime * speed), gridRes * Math.cos(currTime * speed)];
-    pos = vec3Add(center, pos);
-    setView(pos, vec3Normalize(vec3Add(center, vec3Negate(pos))));
-  }
- 
   const commandEncoder = device.createCommandEncoder();
  
-  // TODO Distribute one simulation step across different frames (within updateDelta 'budget')
-  if(currTime - lastSimulationUpdate > updateDelta) {
-    const count = Math.ceil(gridRes / 4);
-    encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationStep % 2], count, count, count);
-    lastSimulationUpdate += updateDelta;
+  // TODO Distribute one simulation iteration across different frames (within updateDelay 'budget')
+  if(currTime - lastSimulationUpdateTime > updateDelay) {
+    if(!simulationPaused) {
+      const count = Math.ceil(gridRes / 4);
+      encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], count, count, count); 
+      simulationIteration++;
+    }
+    lastSimulationUpdateTime += updateDelay;
     simulationStep++;
   }
+
+  updateCamera(currTime);
 
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
     ...right,
@@ -358,41 +331,11 @@ function render(time)
   setPerformanceTimer();
 
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
-  encodeRenderPassAndSubmit(commandEncoder, renderPassDescriptor, renderPipeline, bindGroup[simulationStep % 2]);
+  encodeRenderPassAndSubmit(commandEncoder, renderPassDescriptor, renderPipeline, bindGroup[simulationIteration % 2]);
   
   device.queue.submit([commandEncoder.finish()]);
 
   requestAnimationFrame(render);
-}
-
-function updateEvents(events, updateFunction)
-{
-  events.forEach(e => {
-    if(e.step == simulationStep) {
-      updateFunction(e.obj);
-      return;
-    }
-  });
-}
-
-function update(currTime)
-{
-  if(simulationStep == PAUSE_AND_RECORD_AT) {
-    recording = true;
-    paused = true;
-    return;
-  }
-
-  if(simulationStep > activeSimulationStep)
-  {
-    updateEvents(gridEvents, setGrid);
-    updateEvents(ruleEvents, setRules);
-    updateEvents(simulationSpeedEvents, setUpdateDelta);
-
-    // TODO Implement actual camera handling/updates here
-  }
-
-  activeSimulationStep = simulationStep;
 }
 
 function setPerformanceTimer(timerName)
@@ -406,6 +349,227 @@ function setPerformanceTimer(timerName)
     }).catch(function(err) {
       console.log(err);
     });
+}
+
+function update()
+{
+  if(simulationStep == START_RECORDING_AT) {
+    recording = true;
+    idle = true;
+    return;
+  }
+
+  if(simulationStep > previousSimulationStep) {
+    updateEvents(GRID_EVENTS, setGrid);
+    updateEvents(RULE_EVENTS, setRules);
+    updateEvents(TIME_EVENTS, setTime);
+    previousSimulationStep = simulationStep;
+  }
+}
+
+function updateEvents(events, updateFunction)
+{
+  events.forEach(e => {
+    if(e.step == simulationStep) {
+      updateFunction(e.obj);
+      return;
+    }
+  });
+}
+
+function updateCamera(currTime)
+{
+  if(overviewCamera) {
+    let speed = 0.00025;
+    let center = vec3Scale([gridRes, gridRes, gridRes], 0.5);
+    let pos = [gridRes * Math.sin(currTime * speed), 0.75 * gridRes * Math.sin(currTime * speed), gridRes * Math.cos(currTime * speed)];
+    pos = vec3Add(center, pos);
+    setView(pos, vec3Normalize(vec3Add(center, vec3Negate(pos))));
+  } 
+}
+
+function setGrid(obj)
+{
+  for(let i=0; i<grid.length; i++)
+    grid[i] = 0;
+
+  if(rand === undefined || obj.seed != seed) {
+    seed = obj.seed;
+    rand = splitmix32(seed);
+  }
+
+  gridRes = Math.min(obj.gridRes, MAX_GRID_RES);
+
+  grid[0] = 1;
+  grid[1] = gridRes;
+  grid[2] = gridRes * gridRes;
+
+  const center = gridRes / 2;
+  const min = center - obj.area;
+  const max = center + obj.area;
+
+  for(let k=min; k<max; k++)
+    for(let j=min; j<max; j++)
+      for(let i=min; i<max; i++)
+        grid[3 + gridRes * gridRes * k + gridRes * j + i] = rand() > 0.7 ? 1 : 0;
+
+  device.queue.writeBuffer(gridBuffer[0], 0, grid);
+  device.queue.writeBuffer(gridBuffer[1], 0, grid);
+
+  console.log(`{ step: ${(RECORDING_OFS + simulationStep)}, obj: { gridRes: ${gridRes}, seed: ${seed}, area: ${obj.area} } }, // GRID_EVENT`);
+}
+
+function setRules(obj)
+{
+  const RULE_OFS = 2;
+  const BIRTH_OFS = 27;
+
+  for(let i=0; i<rules.length; i++)
+    rules[i] = 0;
+
+  rules[0] = 0; // automaton kind (not used at the moment)
+  rules[1] = 5; // number of states
+
+  let name;
+  switch(obj.ruleSet) {
+    case 1:
+      name = "445";
+      rules[RULE_OFS + 4] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 4] = 1;
+      break;
+    case 2:
+      name = "amoeba";
+      for(let i=9; i<27; i++)
+        rules[RULE_OFS + i] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 5] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 6] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 7] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 12] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 13] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 15] = 1;
+      break;
+    case 3:
+      name = "pyro"; 
+      rules[1] = 10;
+      rules[RULE_OFS + 4] = 1;
+      rules[RULE_OFS + 5] = 1;
+      rules[RULE_OFS + 6] = 1;
+      rules[RULE_OFS + 7] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 6] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 7] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 8] = 1;
+      break;
+    case 4:
+      name = "framework";
+      rules[1] = 4;
+      for(let i=7; i<27; i++)
+        rules[RULE_OFS + i] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 4] = 1;
+      break;
+    case 5:
+      name = "coral";
+      rules[1] = 4;
+      rules[RULE_OFS + 5] = 1;
+      rules[RULE_OFS + 6] = 1;
+      rules[RULE_OFS + 7] = 1;
+      rules[RULE_OFS + 8] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 6] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 7] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 9] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 12] = 1;
+      break;
+    case 6:
+      name = "crystal";
+      rules[RULE_OFS + 1] = 1;
+      rules[RULE_OFS + 2] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 1] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 3] = 1;
+      break;
+    //case 7:
+    //  name = "symmetry";
+    //  rules[1] = 10;
+    //  rules[RULE_OFS + BIRTH_OFS + 2] = 1;
+    // break;
+    case 7:
+      name = "stable";
+      rules[1] = 2;
+      for(let i=13; i<27; i++)
+        rules[RULE_OFS + i] = 1;
+      for(let i=14; i<20; i++)
+        rules[RULE_OFS + BIRTH_OFS + i] = 1;
+    case 8:
+      name = "shell";
+      rules[RULE_OFS + 6] = 1;
+      rules[RULE_OFS + 7] = 1;
+      rules[RULE_OFS + 8] = 1;
+      rules[RULE_OFS + 9] = 1;
+      rules[RULE_OFS + 11] = 1;
+      rules[RULE_OFS + 13] = 1;
+      rules[RULE_OFS + 15] = 1;
+      rules[RULE_OFS + 16] = 1;
+      rules[RULE_OFS + 18] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 6] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 7] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 8] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 9] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 10] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 13] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 14] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 16] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 18] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 19] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 22] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 23] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 24] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 25] = 1;
+     break;
+   case 9:
+      name = "pulse";
+      rules[1] = 10;
+      rules[RULE_OFS + 3] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 1] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 2] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 3] = 1;
+      break;
+     case 0:
+      name = "clouds";
+      for(let i=13; i<27; i++)
+        rules[RULE_OFS + i] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 13] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 14] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 17] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 18] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 19] = 1;
+      break;
+  }
+
+  device.queue.writeBuffer(rulesBuffer, 0, rules);
+
+  console.log(`{ step: ${(RECORDING_OFS + simulationStep)}, obj: { ruleSet: ${obj.ruleSet} } }, // RULE_EVENT (${name}, states: ${rules[1]})`);
+}
+
+function setTime(obj)
+{
+  if(obj.delta == 0)
+    simulationPaused = !simulationPaused;
+  else
+    updateDelay += obj.delta;
+ 
+  console.log(`{ step: ${(RECORDING_OFS + simulationStep)}, obj: { delta: ${obj.delta} } }, // TIME_EVENT (paused: ${simulationPaused}, updateDelay: ${updateDelay})`);
+}
+
+function setView(e, f)
+{
+  eye = e;
+  fwd = f;
+  right = vec3Normalize(vec3Cross(fwd, [0, 1, 0]));
+  up = vec3Cross(right, fwd);
+}
+
+function resetView()
+{
+  setView([gridRes, gridRes, gridRes],
+    vec3Normalize(vec3Add(vec3Scale([gridRes, gridRes, gridRes], 0.5), vec3Negate([gridRes, gridRes, gridRes]))));
 }
 
 function vec3Add(a, b)
@@ -467,160 +631,6 @@ function axisRotation(axis, angle)
           0, 0, 0, 1]
 }
 
-function setGrid(obj)
-{
-  for(let i=0; i<grid.length; i++)
-    grid[i] = 0;
-
-  if(rand === undefined || obj.seed != seed) {
-    seed = obj.seed;
-    rand = splitmix32(seed);
-  }
-
-  gridRes = Math.min(obj.gridRes, MAX_GRID_RES);
-
-  grid[0] = 1;
-  grid[1] = gridRes;
-  grid[2] = gridRes * gridRes;
-
-  const center = gridRes / 2;
-  const min = center - obj.area;
-  const max = center + obj.area;
-
-  for(let k=min; k<max; k++)
-    for(let j=min; j<max; j++)
-      for(let i=min; i<max; i++)
-        grid[3 + gridRes * gridRes * k + gridRes * j + i] = rand() > 0.7 ? 1 : 0;
-
-  device.queue.writeBuffer(gridBuffer[0], 0, grid);
-  device.queue.writeBuffer(gridBuffer[1], 0, grid);
-
-  // TEMPTEMP
-  resetView();
-
-  // TEMPTEMP only for recording
-  if(simulationStep === undefined)
-    simulationStep = 0;
-
-  console.log(`{ step: ${(RECORDING_OFS + simulationStep)}, obj: { gridRes: ${gridRes}, seed: ${seed}, area: ${obj.area} } }, // GRID_EVENT`);
-}
-
-function setRules(obj)
-{
-  const RULE_OFS = 2;
-  const BIRTH_OFS = 27;
-
-  for(let i=0; i<rules.length; i++)
-    rules[i] = 0;
-
-  rules[0] = 0; // automaton kind (not used at the moment)
-  rules[1] = 5; // number of states
-
-  let name;
-  switch(obj.ruleSet) {
-    case 1:
-      name = "445";
-      rules[RULE_OFS + 4] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 4] = 1;
-      break;
-    case 2:
-      name = "amoeba";
-      for(let i=9; i<27; i++)
-        rules[RULE_OFS + i] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 5] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 6] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 7] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 12] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 13] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 15] = 1;
-      break;
-    case 3:
-      name = "pyro"; 
-      rules[1] = 10;
-      rules[RULE_OFS + 4] = 1;
-      rules[RULE_OFS + 5] = 1;
-      rules[RULE_OFS + 6] = 1;
-      rules[RULE_OFS + 7] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 6] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 7] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 8] = 1;
-      break;
-    case 4:
-      name = "grids";
-      rules[1] = 4;
-      for(let i=7; i<27; i++)
-        rules[RULE_OFS + i] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 4] = 1;
-      break;
-    case 5:
-      name = "empty";
-      break;
-    case 6:
-      name = "empty";
-      break;
-     case 7:
-      name = "empty";
-      break;
-    case 8:
-      name = "single";
-      rules[1] = 2;
-      rules[RULE_OFS + BIRTH_OFS + 2] = 1;
-      break;
-    case 9:
-      name = "clouds";
-      for(let i=13; i<27; i++)
-        rules[RULE_OFS + i] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 13] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 14] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 17] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 18] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 19] = 1;
-      break;
-    case 0:
-      name = "decay";
-      rules[RULE_OFS + 1] = 1;
-      rules[RULE_OFS + 4] = 1;
-      rules[RULE_OFS + 8] = 1;
-      rules[RULE_OFS + 11] = 1;
-      for(let i=13; i<27; i++) {
-        rules[RULE_OFS + i] = 1;
-        rules[RULE_OFS + BIRTH_OFS + i] = 1;
-      }
-      break;
-  }
-
-  device.queue.writeBuffer(rulesBuffer, 0, rules);
-
-  if(simulationStep === undefined)
-    simulationStep = 0;
-
-  console.log(`{ step: ${(RECORDING_OFS + simulationStep)}, obj: { ruleSet: ${obj.ruleSet} } }, // RULE_EVENT: ${name}`);
-}
-
-function setUpdateDelta(obj)
-{
-  updateDelta = obj.delta;
-
-  if(simulationStep === undefined)
-    simulationStep = 0;
-
-  console.log(`{ step: ${(RECORDING_OFS + simulationStep)}, obj: { delta: ${updateDelta} } }, // SPEED_EVENT`);
-}
-
-function setView(e, f)
-{
-  eye = e;
-  fwd = f;
-  right = vec3Normalize(vec3Cross(fwd, [0, 1, 0]));
-  up = vec3Cross(right, fwd);
-}
-
-function resetView()
-{
-  setView([gridRes, gridRes, gridRes],
-    vec3Normalize(vec3Add(vec3Scale([gridRes, gridRes, gridRes], 0.5), vec3Negate([gridRes, gridRes, gridRes]))));
-}
-
 function handleKeyEvent(e)
 {
   switch (e.key) {
@@ -636,21 +646,24 @@ function handleKeyEvent(e)
     case "s":
       setView(vec3Add(eye, vec3Scale(fwd, -MOVE_VELOCITY)), fwd);
       break;
-    case "r":
+    case "v":
       resetView();
       break;
-    case "c":
+    case "o":
       overviewCamera = !overviewCamera;
       break;
-    case "o":
+    case "Enter":
       recording = !recording;
+      console.log("Recording " + (recording ? "enabled" : "disabled"));
       break;
-    case "p":
-      // Reload shader
+    case "l":
       createPipelines();
+      console.log("Shader reloaded");
       break;
     case " ":
-      paused = !paused;
+      // Intro time and simulation time pause
+      idle = !idle;
+      console.log("Idle mode " + (idle ? "enabled" : "disabled"));
       break;
   }
 
@@ -658,7 +671,7 @@ function handleKeyEvent(e)
   {
     if(e.key !== " " && !isNaN(e.key))
     {
-      setRules({ ruleSet: parseInt(e.key) });
+      setRules({ ruleSet: parseInt(e.key, 10) });
       return;
     }
 
@@ -666,21 +679,20 @@ function handleKeyEvent(e)
       case "i":
         setGrid({ gridRes: MAX_GRID_RES, seed: seed, area: 4 });
         break;
+      case "#":
+        // Pause simulation (but intro time goes on)
+        setTime({ delta: 0 });
+        break;
       case "+":
-        setUpdateDelta({ delta: Math.round(updateDelta + updateDelta / UPDATE_DELTA_CHANGE_FACTOR) });
+        setTime({ delta: 50 });
         break;
       case "-":
-        setUpdateDelta({ delta: Math.round(updateDelta - updateDelta / UPDATE_DELTA_CHANGE_FACTOR) });
+        setTime({ delta: -50 });
         break;
     }
   } else {
-    switch(e.key) {
-      case "Enter":
-        // Reset simulation steps back to start
-        start = undefined;
-        // TODO Seek audio to begin of track for proper time
-        break;
-    }
+    if(e.key == ".")
+      startTime = undefined;
   }
 }
 
@@ -701,7 +713,6 @@ function handleMouseMoveEvent(e)
     pitch = currentPitch - maxPitch;
   }
 
-  // Pitch locally, yaw globally to avoid unwanted roll
   setView(eye, vec3Transform(vec3Transform(fwd, axisRotation(right, pitch)), axisRotation([0, 1, 0], yaw)));
 }
 
@@ -722,12 +733,7 @@ function startRender()
     canvas.style.top = 0;
   }
 
-  if(recording) {
-    setGrid({ gridRes: MAX_GRID_RES, seed: seed, area: 4 });
-    setRules({ ruleSet: 2 });
-    setUpdateDelta({ delta: DEFAULT_UPDATE_DELTA });
-  }
-  resetView();
+  update(0);
 
   document.querySelector("button").removeEventListener("click", startRender);
 
@@ -776,7 +782,6 @@ async function main()
     await prepareAudio();
   }
 
-  // Initialize to max size even if we only use a portion of it
   grid = new Uint32Array(3 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
   rules = new Uint32Array(2 + 2 * 27);
 

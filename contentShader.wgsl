@@ -225,8 +225,7 @@ fn calcOcclusion(pos: vec3f, index: i32, norm: vec3i) -> f32
 
 fn shade(pos: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> vec3f
 {
-  /*
-  // Wireframe, better add AA
+  /*// Wireframe, better add AA
   let border = vec3f(0.5 - 0.05);
   let wire = (vec3f(1) - abs((*hit).norm)) * abs(fract(pos) - vec3f(0.5));
 
