@@ -1,10 +1,10 @@
 const FULLSCREEN = false;
 const AUDIO = false;
 
-const RECORDING = false;
+const RECORDING = true;
 const RECORDING_OFS = 0;
 const START_RECORDING_AT = -1;
-const OVERVIEW_CAMERA = true;
+const OVERVIEW_CAMERA = false;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 1024;
@@ -64,35 +64,9 @@ const GRID_EVENTS = [
 
 const RULE_EVENTS = [
 { step: 0, obj: { ruleSet: 2 } }, // RULE_EVENT (amoeba, states: 5)
-{ step: 0, obj: { ruleSet: 7 } }, // RULE_EVENT (shell, states: 2)
-{ step: 14, obj: { ruleSet: 5 } }, // RULE_EVENT (coral, states: 4)
-{ step: 29, obj: { ruleSet: 6 } }, // RULE_EVENT (crystal, states: 5)
-{ step: 34, obj: { ruleSet: 3 } }, // RULE_EVENT (pyro, states: 10)
-{ step: 46, obj: { ruleSet: 9 } }, // RULE_EVENT (pulse, states: 10)
-{ step: 52, obj: { ruleSet: 2 } }, // RULE_EVENT (amoeba, states: 5)
-{ step: 67, obj: { ruleSet: 6 } }, // RULE_EVENT (crystal, states: 5)
-{ step: 71, obj: { ruleSet: 7 } }, // RULE_EVENT (shell, states: 2)
-{ step: 77, obj: { ruleSet: 0 } }, // RULE_EVENT (clouds, states: 5)
-{ step: 112, obj: { ruleSet: 4 } }, // RULE_EVENT (framework, states: 4)
-{ step: 158, obj: { ruleSet: 1 } }, // RULE_EVENT (445, states: 5)
-{ step: 183, obj: { ruleSet: 9 } }, // RULE_EVENT (pulse, states: 10)
-{ step: 194, obj: { ruleSet: 6 } }, // RULE_EVENT (crystal, states: 5)
-{ step: 198, obj: { ruleSet: 8 } }, // RULE_EVENT (shell, states: 5)
-{ step: 208, obj: { ruleSet: 3 } }, // RULE_EVENT (pyro, states: 10)
-{ step: 227, obj: { ruleSet: 2 } }, // RULE_EVENT (amoeba, states: 5)
-{ step: 236, obj: { ruleSet: 9 } }, // RULE_EVENT (pulse, states: 10)
-{ step: 241, obj: { ruleSet: 5 } }, // RULE_EVENT (coral, states: 4)
-{ step: 271, obj: { ruleSet: 3 } }, // RULE_EVENT (pyro, states: 10)
-{ step: 284, obj: { ruleSet: 2 } }, // RULE_EVENT (amoeba, states: 5)
-{ step: 296, obj: { ruleSet: 1 } }, // RULE_EVENT (445, states: 5)
-{ step: 420, obj: { ruleSet: 4 } }, // RULE_EVENT (framework, states: 4)
 ];
 
 const TIME_EVENTS = [
-{ step: 296, obj: { delta: -50 } }, // TIME_EVENT (paused: false, updateDelay: 200
-{ step: 297, obj: { delta: -50 } }, // TIME_EVENT (paused: false, updateDelay: 150
-{ step: 298, obj: { delta: -50 } }, // TIME_EVENT (paused: false, updateDelay: 100
-{ step: 299, obj: { delta: -50 } }, // TIME_EVENT (paused: false, updateDelay: 100
 ];
 
 const CAMERA_EVENTS = [];
@@ -385,7 +359,12 @@ function updateCamera(currTime)
     let pos = [gridRes * Math.sin(currTime * speed), 0.75 * gridRes * Math.sin(currTime * speed), gridRes * Math.cos(currTime * speed)];
     pos = vec3Add(center, pos);
     setView(pos, vec3Normalize(vec3Add(center, vec3Negate(pos))));
-  } 
+  } else {
+    // Keep cam unsteady
+    let t = (currTime + simulationStep) * 0.00125;
+    let unsteady = vec3Normalize(vec3Add(fwd, vec3Scale([0.4 * Math.cos(1.3 * t + Math.sin(t * 0.3)), Math.pow(0.3 * Math.cos(t * 0.4), 3.0), 0.5 * Math.cos(t * 1.3 + Math.cos(t))], 0.0007)));
+    setView(eye, unsteady);
+  }
 }
 
 function setGrid(obj)
@@ -439,6 +418,7 @@ function setRules(obj)
       break;
     case 2:
       name = "amoeba";
+      rules[1] = 5;
       for(let i=9; i<27; i++)
         rules[RULE_OFS + i] = 1;
       rules[RULE_OFS + BIRTH_OFS + 5] = 1;
@@ -449,7 +429,7 @@ function setRules(obj)
       rules[RULE_OFS + BIRTH_OFS + 15] = 1;
       break;
     case 3:
-      name = "pyro"; 
+      name = "pyro10"; 
       rules[1] = 10;
       rules[RULE_OFS + 4] = 1;
       rules[RULE_OFS + 5] = 1;
@@ -461,69 +441,50 @@ function setRules(obj)
       break;
     case 4:
       name = "framework";
-      rules[1] = 4;
+      rules[1] = 5;
       for(let i=7; i<27; i++)
         rules[RULE_OFS + i] = 1;
       rules[RULE_OFS + BIRTH_OFS + 4] = 1;
       break;
     case 5:
-      name = "coral";
-      rules[1] = 4;
-      rules[RULE_OFS + 5] = 1;
-      rules[RULE_OFS + 6] = 1;
-      rules[RULE_OFS + 7] = 1;
-      rules[RULE_OFS + 8] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 6] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 7] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 9] = 1;
+      name = "spiky";
+      rules[1] = 10;
+      for(let i=7; i<27; i++)
+        rules[RULE_OFS + i] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 4] = 1;
       rules[RULE_OFS + BIRTH_OFS + 12] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 13] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 15] = 1;
       break;
     case 6:
-      name = "crystal";
-      rules[RULE_OFS + 1] = 1;
-      rules[RULE_OFS + 2] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 1] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 3] = 1;
+      name = "builder";
+      rules[1] = 10;
+      rules[RULE_OFS + 6] = 1;
+      rules[RULE_OFS + 9] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 4] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 6] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 8] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 9] = 1;
       break;
-    //case 7:
-    //  name = "symmetry";
-    //  rules[1] = 10;
-    //  rules[RULE_OFS + BIRTH_OFS + 2] = 1;
-    // break;
     case 7:
+      name = "ripple";
+      rules[1] = 10;
+      for(let i=8; i<27; i++)
+        rules[RULE_OFS + i] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 4] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 12] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 13] = 1;
+      rules[RULE_OFS + BIRTH_OFS + 15] = 1;
+      break;
+    case 8:
       name = "stable";
       rules[1] = 2;
       for(let i=13; i<27; i++)
         rules[RULE_OFS + i] = 1;
       for(let i=14; i<20; i++)
         rules[RULE_OFS + BIRTH_OFS + i] = 1;
-    case 8:
-      name = "shell";
-      rules[RULE_OFS + 6] = 1;
-      rules[RULE_OFS + 7] = 1;
-      rules[RULE_OFS + 8] = 1;
-      rules[RULE_OFS + 9] = 1;
-      rules[RULE_OFS + 11] = 1;
-      rules[RULE_OFS + 13] = 1;
-      rules[RULE_OFS + 15] = 1;
-      rules[RULE_OFS + 16] = 1;
-      rules[RULE_OFS + 18] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 6] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 7] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 8] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 9] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 10] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 13] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 14] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 16] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 18] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 19] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 22] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 23] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 24] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 25] = 1;
-     break;
-   case 9:
+      break;
+    case 9:
       name = "pulse";
       rules[1] = 10;
       rules[RULE_OFS + 3] = 1;
@@ -531,7 +492,7 @@ function setRules(obj)
       rules[RULE_OFS + BIRTH_OFS + 2] = 1;
       rules[RULE_OFS + BIRTH_OFS + 3] = 1;
       break;
-     case 0:
+    case 0:
       name = "clouds";
       for(let i=13; i<27; i++)
         rules[RULE_OFS + i] = 1;
@@ -734,6 +695,9 @@ function startRender()
   }
 
   update(0);
+
+  if(!overviewCamera)
+    resetView();
 
   document.querySelector("button").removeEventListener("click", startRender);
 

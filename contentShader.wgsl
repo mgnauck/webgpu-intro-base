@@ -237,7 +237,7 @@ fn shade(pos: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> vec3f
   let sky = 0.4 + (*hit).norm.y * 0.6;
 
   // Position in cube and z-distance with sky and state
-  let col = pos / f32(grid.mul.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
+  let col = vec3f(0.3, 0.3, 0.6) * pos.xxx / f32(grid.mul.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
 
   /*
   // Distance from center into palette scaled by state and dist
@@ -256,6 +256,16 @@ fn background(ori: vec3f, dir: vec3f) -> vec3f
   // TODO Make much better background
   let a = (1.01 - (0.4 + dir.y * 0.6));
   return vec3f(0.00003) / (a * a); 
+}
+
+fn filmicToneACES(x: vec3f) -> vec3f
+{
+  let a = 2.51;
+  let b = 0.03;
+  let c = 2.43;
+  let d = 0.59;
+  let e = 0.14;
+  return saturate(x * (a * x + vec3f(b)) / (x * (c * x + vec3f(d)) + vec3f(e)));
 }
 
 @vertex
@@ -293,6 +303,8 @@ fn fragmentMain(@builtin(position) position: vec4f) -> @location(0) vec4f
 
   // Amplify
   //col += pow(max(col - vec3f(0.3), vec3f(0.0)), vec3f(1.5)) * 0.5;
+  
+  col = filmicToneACES(col);
 
   return vec4f(pow(col, vec3f(0.4545)), 1.0);
 }
