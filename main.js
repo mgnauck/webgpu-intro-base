@@ -1,7 +1,7 @@
 const FULLSCREEN = false;
 const AUDIO = false;
 
-const RECORDING = true;
+const RECORDING = false;
 const RECORDING_OFS = 0;
 const START_RECORDING_AT = -1;
 const OVERVIEW_CAMERA = false;
@@ -11,11 +11,10 @@ const CANVAS_WIDTH = 1024;
 const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 const FOV = 50.0;
 
-const AUDIO_WIDTH = 4096;
-const AUDIO_HEIGHT = 4096;
+const AUDIO_BUFFER_SIZE = Math.pow(256, 3); // 4096*4096
 
 const MAX_GRID_RES = 128;
-const DEFAULT_UPDATE_DELAY = 250;
+const DEFAULT_UPDATE_DELAY = 200;
 
 const MOVE_VELOCITY = 0.75;
 const LOOK_VELOCITY = 0.025;
@@ -59,11 +58,11 @@ let previousSimulationStep = -1;
 let simulationIteration = 0;
 
 const GRID_EVENTS = [
-{ step: 0, obj: { gridRes: 128, seed: 1464541643, area: 4 } }, // GRID_EVENT
+{ step: 0, obj: { gridRes: 128, seed: 1474531643, area: 12 } }, // GRID_EVENT
 ];
 
 const RULE_EVENTS = [
-{ step: 0, obj: { ruleSet: 2 } }, // RULE_EVENT (amoeba, states: 5)
+{ step: 0, obj: { ruleSet: 5 } },
 ];
 
 const TIME_EVENTS = [
@@ -136,58 +135,51 @@ async function prepareAudio()
 {
   audioContext = new AudioContext();
 
-  let audioBuffer = audioContext.createBuffer(
-      2, AUDIO_WIDTH * AUDIO_HEIGHT, audioContext.sampleRate);
-  console.log(
-      "Max audio length: " +
-      (audioBuffer.length / audioContext.sampleRate / 60).toFixed(2) + " min");
+  let webAudioBuffer = audioContext.createBuffer(
+      2, AUDIO_BUFFER_SIZE, audioContext.sampleRate);
+  console.log("Max audio length: " + (webAudioBuffer.length / audioContext.sampleRate / 60).toFixed(2) + " min");
 
-  let audioTexture = device.createTexture({
-    format: "rg32float",
-    usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC,
-    size: [AUDIO_WIDTH, AUDIO_HEIGHT]
+  let audioBuffer = device.createBuffer({
+    size: AUDIO_BUFFER_SIZE * 2 * 4, // size * stereo * float
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
   });
 
   let bindGroupLayout = device.createBindGroupLayout({
-    entries: [{
-      binding: 0,
-      visibility: GPUShaderStage.COMPUTE,
-      storageTexture: {format: "rg32float"}
-    }]
-  });
+    entries: [ { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: {type: "storage"} } ] });
 
   let bindGroup = device.createBindGroup({
     layout: bindGroupLayout,
-    entries: [{binding: 0, resource: audioTexture.createView()}]
-  });
+    entries: [ { binding: 0, resource: {buffer: audioBuffer} } ] });
 
-  const readBuffer = device.createBuffer({
-    usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-    size: AUDIO_WIDTH * AUDIO_HEIGHT * 2 * 4
+  let readBuffer = device.createBuffer({
+    size: AUDIO_BUFFER_SIZE * 2 * 4,
+    usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
   });
-
-  setPerformanceTimer();
 
   let shaderModule = device.createShaderModule({code: await loadTextFile("audioShader.wgsl")});
   let pipelineLayout = device.createPipelineLayout({bindGroupLayouts: [bindGroupLayout]});
 
-  const commandEncoder = device.createCommandEncoder();
+  let commandEncoder = device.createCommandEncoder();
   
-  encodeComputePassAndSubmit(commandEncoder, await createComputePipeline(shaderModule, pipelineLayout, "audioMain"),
-      bindGroup, Math.ceil(AUDIO_WIDTH / 8), Math.ceil(AUDIO_HEIGHT / 8), 1);
+  setPerformanceTimer();
 
-  commandEncoder.copyTextureToBuffer(
-    {texture: audioTexture}, {buffer: readBuffer, bytesPerRow: AUDIO_WIDTH * 2 * 4}, [AUDIO_WIDTH, AUDIO_HEIGHT]);
+  let count = Math.ceil(256 / 4);
+  encodeComputePassAndSubmit(commandEncoder,
+    await createComputePipeline(shaderModule, pipelineLayout, "audioMain"),
+    bindGroup, count, count, count);
+
+  commandEncoder.copyBufferToBuffer(
+    audioBuffer, 0, readBuffer, 0, AUDIO_BUFFER_SIZE * 2 * 4);
 
   device.queue.submit([commandEncoder.finish()]);
 
   await readBuffer.mapAsync(GPUMapMode.READ);
-  const audioData = new Float32Array(readBuffer.getMappedRange());
+  let audioData = new Float32Array(readBuffer.getMappedRange());
 
-  const channel0 = audioBuffer.getChannelData(0);
-  const channel1 = audioBuffer.getChannelData(1);
+  let channel0 = webAudioBuffer.getChannelData(0);
+  let channel1 = webAudioBuffer.getChannelData(1);
 
-  for (let i = 0; i < AUDIO_WIDTH * AUDIO_HEIGHT; i++) {
+  for (let i = 0; i < AUDIO_BUFFER_SIZE; i++) {
     channel0[i] = audioData[(i << 1) + 0];
     channel1[i] = audioData[(i << 1) + 1];
   }
@@ -195,7 +187,7 @@ async function prepareAudio()
   readBuffer.unmap();
 
   audioBufferSourceNode = audioContext.createBufferSource();
-  audioBufferSourceNode.buffer = audioBuffer;
+  audioBufferSourceNode.buffer = webAudioBuffer;
   audioBufferSourceNode.connect(audioContext.destination);
 }
 
@@ -258,15 +250,8 @@ async function createPipelines()
 
 function render(time)
 {
-  if(startTime === undefined) {
+  if(startTime === undefined)
     startTime = AUDIO ? (audioContext.currentTime * 1000.0) : time;
-    
-    lastSimulationUpdateTime = 0;
-    simulationPaused = false;
-    simulationStep = 0;
-    previousSimulationStep = -1;
-    simulationIteration = 0;
-  }
 
   const currTime = AUDIO ? (audioContext.currentTime * 1000.0) : (time - startTime);
 
@@ -652,8 +637,14 @@ function handleKeyEvent(e)
         break;
     }
   } else {
-    if(e.key == ".")
+    if(e.key == ".") {
       startTime = undefined;
+      lastSimulationUpdateTime = 0;
+      simulationPaused = false;
+      simulationStep = 0;
+      previousSimulationStep = -1;
+      simulationIteration = 0; 
+    }
   }
 }
 

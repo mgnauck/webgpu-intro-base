@@ -122,13 +122,7 @@ fn evalMultiState(pos: vec3i, states: u32)
     }
     default {
       // Refactory period
-      var v = value + 1;
-      if(value >= rules.states) {
-        v = 0;
-      }
-      outputGrid.arr[index] = v;
-      // TODO Below code should be the same as above. Think about it once more!
-      //outputGrid.arr[index] = (min(value, rules.states - 1) + 1) % rules.states; 
+      outputGrid.arr[index] = min(value + 1, rules.states) % rules.states; 
     }
   }
 }
@@ -237,7 +231,7 @@ fn shade(pos: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> vec3f
   let sky = 0.4 + (*hit).norm.y * 0.6;
 
   // Position in cube and z-distance with sky and state
-  let col = vec3f(0.3, 0.3, 0.6) * pos.xxx / f32(grid.mul.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
+  let col = vec3f(0.005) + vec3f(0.3, 0.3, 0.6) * pos.xxx / f32(grid.mul.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
 
   /*
   // Distance from center into palette scaled by state and dist
@@ -258,6 +252,7 @@ fn background(ori: vec3f, dir: vec3f) -> vec3f
   return vec3f(0.00003) / (a * a); 
 }
 
+// https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
 fn filmicToneACES(x: vec3f) -> vec3f
 {
   let a = 2.51;
