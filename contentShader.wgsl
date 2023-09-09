@@ -18,7 +18,6 @@ struct Grid
 
 struct RuleSet
 {
-  kind: u32,
   states: u32,
   arr: array<u32>
 }
@@ -43,34 +42,10 @@ const TWO_PI = PI * 2.0;
 @group(0) @binding(2) var<storage, read_write> outputGrid: Grid;
 @group(0) @binding(3) var<storage> rules: RuleSet;
 
-fn maxComp(v: vec3f) -> f32
-{
-  return max(v.x, max(v.y, v.z));
-}
-
-fn minComp(v: vec3f) -> f32
-{
-  return min(v.x, min(v.y, v.z));
-}
-
 fn getCell(x: i32, y: i32, z: i32) -> u32
 {
   // Consider only states 0 and 1. Cells in refactory period do NOT count as active neighbours, i.e. are counted as 0.
   return u32(1 - min(abs(1 - i32(grid.arr[grid.mul.z * z + grid.mul.y * y + x])), 1));
-}
-
-fn getNeumannNeighbourCountWrap(pos: vec3i) -> u32
-{
-  let res = grid.mul.y;
-  let dec = vec3i((pos.x - 1) % res, (pos.y - 1) % res, (pos.z - 1) % res);
-  let inc = vec3i((pos.x + 1) % res, (pos.y + 1) % res, (pos.z + 1) % res);
-
-  return  getCell(inc.x, pos.y, pos.z) +
-          getCell(dec.x, pos.y, pos.z) +
-          getCell(pos.x, inc.y, pos.z) +
-          getCell(pos.x, dec.y, pos.z) +
-          getCell(pos.x, pos.y, inc.z) +
-          getCell(pos.x, pos.y, dec.z);
 }
 
 fn getMooreNeighbourCountWrap(pos: vec3i) -> u32
@@ -107,7 +82,7 @@ fn getMooreNeighbourCountWrap(pos: vec3i) -> u32
           getCell(dec.x, dec.y, dec.z);
 }
 
-fn evalMultiState(pos: vec3i, states: u32)
+fn evalState(pos: vec3i, states: u32)
 {
   let index = dot(pos, grid.mul);
   let value = grid.arr[index];
@@ -130,14 +105,17 @@ fn evalMultiState(pos: vec3i, states: u32)
 @compute @workgroup_size(4,4,4)
 fn computeMain(@builtin(global_invocation_id) globalId: vec3u)
 {
-  switch(rules.kind) {
-    case 1: {
-        // TODO handle different automaton
-    }
-    default: {
-        evalMultiState(vec3i(globalId), rules.states);
-    }
-  }
+  evalState(vec3i(globalId), rules.states);
+}
+
+fn minComp(v: vec3f) -> f32
+{
+  return min(v.x, min(v.y, v.z));
+}
+
+fn maxComp(v: vec3f) -> f32
+{
+  return max(v.x, max(v.y, v.z));
 }
 
 fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, invDir: vec3f, tmin: ptr<function, f32>, tmax: ptr<function, f32>) -> bool
@@ -231,7 +209,7 @@ fn shade(pos: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> vec3f
   let sky = 0.4 + (*hit).norm.y * 0.6;
 
   // Position in cube and z-distance with sky and state
-  let col = vec3f(0.005) + vec3f(0.3, 0.3, 0.6) * pos.xxx / f32(grid.mul.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
+  let col = vec3f(0.005) + pos / f32(grid.mul.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
 
   /*
   // Distance from center into palette scaled by state and dist

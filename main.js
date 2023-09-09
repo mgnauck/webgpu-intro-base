@@ -57,12 +57,38 @@ let simulationStep = 0;
 let previousSimulationStep = -1;
 let simulationIteration = 0;
 
+const RULES = [
+  2023103542460421n, // clouds-5
+  34359738629n, // 4/4-5
+  97240207056901n, // amoeba-5
+  962072678154n, // pyro-10
+  36507219973n, // framework-5
+  96793530464266n, // spiky-10
+  1821066142730n, // builder-10
+  96793530462218n, // ripple-10
+  2216617588948994n, // stable-2
+  30064771210n, // pulse-10
+];
+
+const RULES_NAMES = [
+  "clouds-5", // key '0'
+  "4/4-5", // key '1'
+  "amoeba-5", // key '2'
+  "pyro-10", // ..
+  "framework-5",
+  "spiky-10",
+  "builder-10",
+  "ripple-10",
+  "stable-2",
+  "pulse-10",
+];
+
 const GRID_EVENTS = [
 { step: 0, obj: { gridRes: 128, seed: 1474531643, area: 12 } }, // GRID_EVENT
 ];
 
 const RULE_EVENTS = [
-{ step: 0, obj: { ruleSet: 5 } },
+{ step: 0, obj: { ruleSet: 4 } },
 ];
 
 const TIME_EVENTS = [
@@ -135,41 +161,43 @@ async function prepareAudio()
 {
   audioContext = new AudioContext();
 
-  let webAudioBuffer = audioContext.createBuffer(
-      2, AUDIO_BUFFER_SIZE, audioContext.sampleRate);
+  let webAudioBuffer = audioContext.createBuffer(2, AUDIO_BUFFER_SIZE, audioContext.sampleRate);
+
   console.log("Max audio length: " + (webAudioBuffer.length / audioContext.sampleRate / 60).toFixed(2) + " min");
 
   let audioBuffer = device.createBuffer({
-    size: AUDIO_BUFFER_SIZE * 2 * 4, // size * stereo * float
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
-  });
+    // Size * stereo * sizeof(float)
+    size: AUDIO_BUFFER_SIZE * 2 * 4, 
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC});
 
   let bindGroupLayout = device.createBindGroupLayout({
-    entries: [ { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: {type: "storage"} } ] });
+    entries: [{
+      binding: 0, 
+      visibility: GPUShaderStage.COMPUTE, buffer: {type: "storage"}
+    }]});
 
   let bindGroup = device.createBindGroup({
     layout: bindGroupLayout,
-    entries: [ { binding: 0, resource: {buffer: audioBuffer} } ] });
+    entries: [{
+      binding: 0,
+      resource: {buffer: audioBuffer}
+    }]});
 
   let readBuffer = device.createBuffer({
     size: AUDIO_BUFFER_SIZE * 2 * 4,
-    usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
-  });
+    usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST});
 
   let shaderModule = device.createShaderModule({code: await loadTextFile("audioShader.wgsl")});
   let pipelineLayout = device.createPipelineLayout({bindGroupLayouts: [bindGroupLayout]});
 
   let commandEncoder = device.createCommandEncoder();
   
-  setPerformanceTimer();
-
   let count = Math.ceil(256 / 4);
   encodeComputePassAndSubmit(commandEncoder,
     await createComputePipeline(shaderModule, pipelineLayout, "audioMain"),
     bindGroup, count, count, count);
 
-  commandEncoder.copyBufferToBuffer(
-    audioBuffer, 0, readBuffer, 0, AUDIO_BUFFER_SIZE * 2 * 4);
+  commandEncoder.copyBufferToBuffer(audioBuffer, 0, readBuffer, 0, AUDIO_BUFFER_SIZE * 2 * 4);
 
   device.queue.submit([commandEncoder.finish()]);
 
@@ -204,16 +232,17 @@ async function createGPUResources()
  
   // Buffer space for right, up, fwd, eye, fov, time, simulation step, programmable value/padding
   uniformBuffer = device.createBuffer({
-    size: 16 * 4,
+    size: 16 * 4, 
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
 
-  for(let i=0; i<2; i++) {
+  for(let i=0; i<2; i++)
     gridBuffer[i] = device.createBuffer({
       size: grid.length * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
-  }
 
-  rulesBuffer = device.createBuffer({size: rules.length * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
+  rulesBuffer = device.createBuffer({
+    size: rules.length * 4,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   for(let i=0; i<2; i++) {
     bindGroup[i] = device.createBindGroup({
@@ -362,7 +391,7 @@ function setGrid(obj)
     rand = splitmix32(seed);
   }
 
-  gridRes = Math.min(obj.gridRes, MAX_GRID_RES);
+  gridRes = Math.min(obj.gridRes, MAX_GRID_RES); // Safety
 
   grid[0] = 1;
   grid[1] = gridRes;
@@ -385,113 +414,18 @@ function setGrid(obj)
 
 function setRules(obj)
 {
-  const RULE_OFS = 2;
-  const BIRTH_OFS = 27;
+  let rulesBitsBigInt = RULES[obj.ruleSet];
 
-  for(let i=0; i<rules.length; i++)
-    rules[i] = 0;
+  // State count (bit 0-3)
+  rules[0] = Number(rulesBitsBigInt & BigInt(0xf));
 
-  rules[0] = 0; // automaton kind (not used at the moment)
-  rules[1] = 5; // number of states
-
-  let name;
-  switch(obj.ruleSet) {
-    case 1:
-      name = "445";
-      rules[RULE_OFS + 4] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 4] = 1;
-      break;
-    case 2:
-      name = "amoeba";
-      rules[1] = 5;
-      for(let i=9; i<27; i++)
-        rules[RULE_OFS + i] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 5] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 6] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 7] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 12] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 13] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 15] = 1;
-      break;
-    case 3:
-      name = "pyro10"; 
-      rules[1] = 10;
-      rules[RULE_OFS + 4] = 1;
-      rules[RULE_OFS + 5] = 1;
-      rules[RULE_OFS + 6] = 1;
-      rules[RULE_OFS + 7] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 6] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 7] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 8] = 1;
-      break;
-    case 4:
-      name = "framework";
-      rules[1] = 5;
-      for(let i=7; i<27; i++)
-        rules[RULE_OFS + i] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 4] = 1;
-      break;
-    case 5:
-      name = "spiky";
-      rules[1] = 10;
-      for(let i=7; i<27; i++)
-        rules[RULE_OFS + i] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 4] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 12] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 13] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 15] = 1;
-      break;
-    case 6:
-      name = "builder";
-      rules[1] = 10;
-      rules[RULE_OFS + 6] = 1;
-      rules[RULE_OFS + 9] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 4] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 6] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 8] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 9] = 1;
-      break;
-    case 7:
-      name = "ripple";
-      rules[1] = 10;
-      for(let i=8; i<27; i++)
-        rules[RULE_OFS + i] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 4] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 12] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 13] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 15] = 1;
-      break;
-    case 8:
-      name = "stable";
-      rules[1] = 2;
-      for(let i=13; i<27; i++)
-        rules[RULE_OFS + i] = 1;
-      for(let i=14; i<20; i++)
-        rules[RULE_OFS + BIRTH_OFS + i] = 1;
-      break;
-    case 9:
-      name = "pulse";
-      rules[1] = 10;
-      rules[RULE_OFS + 3] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 1] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 2] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 3] = 1;
-      break;
-    case 0:
-      name = "clouds";
-      for(let i=13; i<27; i++)
-        rules[RULE_OFS + i] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 13] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 14] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 17] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 18] = 1;
-      rules[RULE_OFS + BIRTH_OFS + 19] = 1;
-      break;
-  }
+  // Alive bits (4-31), birth bits (32-59)
+  for(let i=0; i<rules.length - 1; i++)
+    rules[1 + i] = Number((rulesBitsBigInt >> BigInt(4 + i)) & BigInt(0x1));
 
   device.queue.writeBuffer(rulesBuffer, 0, rules);
 
-  console.log(`{ step: ${(RECORDING_OFS + simulationStep)}, obj: { ruleSet: ${obj.ruleSet} } }, // RULE_EVENT (${name}, states: ${rules[1]})`);
+  console.log(`{ step: ${(RECORDING_OFS + simulationStep)}, obj: { ruleSet: ${obj.ruleSet} } }, // RULE_EVENT (${RULES_NAMES[obj.ruleSet]})`);
 }
 
 function setTime(obj)
@@ -737,8 +671,11 @@ async function main()
     await prepareAudio();
   }
 
+  // Grid mul + grid
   grid = new Uint32Array(3 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
-  rules = new Uint32Array(2 + 2 * 27);
+  
+  // State count + alive rules + birth rules
+  rules = new Uint32Array(1 + 2 * 27);
 
   await createGPUResources();
   await createPipelines();
