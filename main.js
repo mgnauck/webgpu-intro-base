@@ -14,13 +14,14 @@ const FOV = 50.0;
 const AUDIO_BUFFER_SIZE = 256 ** 3; // 4096*4096
 
 const MAX_GRID_RES = 128;
-const DEFAULT_UPDATE_DELAY = 200;
+const DEFAULT_UPDATE_DELAY = 250;
 
 const MOVE_VELOCITY = 0.75;
 const LOOK_VELOCITY = 0.025;
 const WHEEL_VELOCITY = 0.005;
 
 let idle = IDLE;
+let overviewCamera = OVERVIEW_CAMERA;
 
 let audioContext;
 let audioBufferSourceNode;
@@ -40,18 +41,18 @@ let context;
 
 let right, up, fwd, eye;
 let programmableValue;
-let overviewCamera = OVERVIEW_CAMERA;
 
-let seed = Math.floor(Math.random() * 4294967296);
+let seed;
 let rand;
 let gridRes;
-let grid;
 let updateDelay = DEFAULT_UPDATE_DELAY;
+let grid;
 let rules;
 
 let startTime;
-let currTime;
 let startIdleTime = 0;
+
+let currTime;
 let lastSimulationUpdateTime = 0;
 let simulationStep = 0;
 let activeSimulationStep = -1;
@@ -85,17 +86,19 @@ const RULES_NAMES = [
 ];
 
 const GRID_EVENTS = [
-{ step: 0, obj: { gridRes: 128, seed: 1474531643, area: 12 } }, // GRID_EVENT
+  { step: 0, obj: { gridRes: 128, /*seed: 1474531643,*/ area: 22 } }, // GRID_EVENT
 ];
 
 const RULE_EVENTS = [
-{ step: 0, obj: { ruleSet: 6 } },
+  { step: 0, obj: { ruleSet: 6 } },
 ];
 
 const TIME_EVENTS = [
+  { step: 0, obj: { delta: -50 } }, // TIME_EVENT (paused: false, updateDelay: 200)
 ];
 
-const CAMERA_EVENTS = [];
+const CAMERA_EVENTS = [
+];
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
 function splitmix32(a) {
@@ -231,7 +234,7 @@ async function createGPUResources()
     ]
   });
  
-  // Buffer space for right, up, fwd, eye, fov, time, simulation step, programmable value/padding
+  // Right, up, fwd, eye, fov, time, simulation step, programmable value/padding
   uniformBuffer = device.createBuffer({
     size: 16 * 4, 
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
@@ -345,14 +348,14 @@ function updateSimulation()
   }
 
   if(simulationStep > activeSimulationStep) {
-    handleEvents(GRID_EVENTS, setGrid);
-    handleEvents(RULE_EVENTS, setRules);
-    handleEvents(TIME_EVENTS, setTime);
+    handleUpdateEvents(GRID_EVENTS, setGrid);
+    handleUpdateEvents(RULE_EVENTS, setRules);
+    handleUpdateEvents(TIME_EVENTS, setTime);
     activeSimulationStep = simulationStep;
   }
 }
 
-function handleEvents(events, updateFunction)
+function handleUpdateEvents(events, updateFunction)
 {
   events.forEach(e => {
     if(e.step == simulationStep) {
@@ -386,7 +389,10 @@ function setGrid(obj)
     grid[i] = 0;
 
   if(rand === undefined || obj.seed != seed) {
-    seed = obj.seed;
+    if(obj.seed === undefined)
+      seed = Math.floor(Math.random() * 4294967296);
+    else
+      seed = obj.seed;
     rand = splitmix32(seed);
   }
 
@@ -447,8 +453,7 @@ function setView(e, f)
 
 function resetView()
 {
-  setView([gridRes, gridRes, gridRes],
-    vec3Normalize(vec3Add(vec3Scale([gridRes, gridRes, gridRes], 0.5), vec3Negate([gridRes, gridRes, gridRes]))));
+  setView([gridRes, gridRes, gridRes], vec3Normalize(vec3Add(vec3Scale([gridRes, gridRes, gridRes], 0.5), vec3Negate([gridRes, gridRes, gridRes]))));
 }
 
 function vec3Add(a, b)
@@ -556,7 +561,7 @@ async function handleKeyEvent(e)
         } else
           startTime += currTime - startIdleTime;
       }
-      console.log("Idle mode " + (idle ? ("enabled at " + startIdleTime) : ("disabled, idle duration: " + (currTime - startIdleTime))));
+      console.log("Idle mode " + (idle ? "enabled" : "disabled"));
       break;
     case "i":
       setGrid({ gridRes: MAX_GRID_RES, seed: seed, area: 4 });
@@ -595,12 +600,11 @@ function handleMouseMoveEvent(e)
   const minPitch = Math.PI / 180.0;
   const maxPitch = 179.0 * Math.PI / 180.0;
 
-  if(newPitch < minPitch) {
+  if(newPitch < minPitch)
     pitch = currentPitch - minPitch;
-  }
-  if(newPitch > maxPitch) {
+
+  if(newPitch > maxPitch)
     pitch = currentPitch - maxPitch;
-  }
 
   setView(eye, vec3Transform(vec3Transform(fwd, axisRotation(right, pitch)), axisRotation([0, 1, 0], yaw)));
 }
@@ -612,9 +616,9 @@ function handleMouseWheelEvent(e)
 
 function startRender()
 {
-  if(FULLSCREEN) {
+  if(FULLSCREEN)
     canvas.requestFullscreen();
-  } else {
+  else {
     canvas.style.width = CANVAS_WIDTH;
     canvas.style.height = CANVAS_HEIGHT;
     canvas.style.position = "absolute";
@@ -630,9 +634,8 @@ function startRender()
   document.querySelector("button").removeEventListener("click", startRender);
 
   canvas.addEventListener("click", async () => {
-    if(!document.pointerLockElement) {
+    if(!document.pointerLockElement)
       await canvas.requestPointerLock({unadjustedMovement: true});
-    }
   });
 
   document.addEventListener("pointerlockchange", () => {
@@ -647,32 +650,27 @@ function startRender()
     }
   });
 
-  if(AUDIO && !idle) {
+  if(AUDIO && !idle)
     audioBufferSourceNode.start();
-  }
 
   requestAnimationFrame(render);
 }
 
 async function main()
 {
-  if(!navigator.gpu) {
+  if(!navigator.gpu)
     throw new Error("WebGPU is not supported on this browser.");
-  }
 
   const gpuAdapter = await navigator.gpu.requestAdapter();
-  if(!gpuAdapter) {
+  if(!gpuAdapter)
     throw new Error("Can not use WebGPU. No GPU adapter available.");
-  }
 
   device = await gpuAdapter.requestDevice();
-  if(!device) {
+  if(!device)
     throw new Error("Failed to request logical device.");
-  }
 
-  if(AUDIO) {
+  if(AUDIO)
     await prepareAudio();
-  }
 
   // Grid mul + grid
   grid = new Uint32Array(3 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
@@ -695,11 +693,10 @@ async function main()
   context = canvas.getContext("webgpu");
   context.configure({device, format: presentationFormat, alphaMode: "opaque"});
 
-  if(AUDIO || FULLSCREEN) {
+  if(AUDIO || FULLSCREEN)
     document.querySelector("button").addEventListener("click", startRender);
-  } else {
+  else
     startRender();
-  }
 }
 
 main();
