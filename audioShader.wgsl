@@ -1,3 +1,4 @@
+const BUFFER_DIM = 128; // Hardcoded :( This must equal the AUDIO_BUFFER_DIM in main.js
 const BPM = 160.0;
 const PI = 3.141592654;
 const TAU = 6.283185307;
@@ -36,31 +37,35 @@ fn kick(time: f32) -> f32
   return amp * sine(phase);
 }
 
-fn hiHat(time: f32) -> f32
+fn hihat(time: f32) -> f32
 {
   let amp = exp(-40.0 * time);
   return amp * noise(time * 110.0).x;
 }
 
-@group(0) @binding(0) var<storage, read_write> outputTexture: array<vec2f>;
+@group(0) @binding(0) var<storage, read_write> buffer: array<vec2f>;
 
 @compute @workgroup_size(4, 4, 4)
 fn audioMain(@builtin(global_invocation_id) globalId: vec3u)
-{  
+{
+  if(globalId.x >= BUFFER_DIM || globalId.y >= BUFFER_DIM || globalId.z >= BUFFER_DIM) {
+    return;
+  }
+
   // Calculate current sample from given buffer id
-  let sample = dot(globalId, vec3u(1, 256, 256 * 256));
+  let sample = dot(globalId, vec3u(1, BUFFER_DIM, BUFFER_DIM * BUFFER_DIM));
   
   let time = f32(sample) / 44100.0;
   let beat = timeToBeat(time);
 
-  // At the moment samples are calculated in mono and then written to left/right
+  // Samples are calculated in mono and then written to left/right
 
   // Kick
   var result = vec2f(0.6 * kick(beatToTime(beat % 1.0)));
 
   // Hihat
-  result += vec2f(0.3 * hiHat(beatToTime((beat + 0.5) % 1.0)));
+  result += vec2f(0.3 * hihat(beatToTime((beat + 0.5) % 1.0)));
 
   // Write 2 floats between -1 and 1 to output buffer (stereo)
-  outputTexture[sample] = clamp(result, vec2f(-1), vec2f(1));
+  buffer[sample] = clamp(result, vec2f(-1), vec2f(1));
 }

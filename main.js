@@ -1,8 +1,9 @@
 const FULLSCREEN = false;
 const AUDIO = false;
 
-const IDLE = true;
-const IDLE_AT = -1;
+const IDLE = false;
+const RECORDING = false;
+const RECORDING_AT = -1; // Switch to recording mode at given step
 const SIMULATION_STEP_OFS = 0;
 const OVERVIEW_CAMERA = false;
 
@@ -11,16 +12,20 @@ const CANVAS_WIDTH = 1024;
 const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 const FOV = 50.0;
 
-const AUDIO_BUFFER_SIZE = 256 ** 3; // 4096*4096
+const AUDIO_BUFFER_DIM = 256;
+const AUDIO_BUFFER_SIZE = AUDIO_BUFFER_DIM ** 3; // 4096*4096
 
 const MAX_GRID_RES = 128;
 const DEFAULT_UPDATE_DELAY = 250;
+const GLOBAL_CAM_SPEED = 50;
+const DEFAULT_CAM_SPEED = 1;
 
 const MOVE_VELOCITY = 0.75;
 const LOOK_VELOCITY = 0.025;
 const WHEEL_VELOCITY = 0.005;
 
 let idle = IDLE;
+let recording = RECORDING;
 let overviewCamera = OVERVIEW_CAMERA;
 
 let audioContext;
@@ -39,7 +44,7 @@ let renderPassDescriptor;
 let canvas;
 let context;
 
-let right, up, fwd, eye;
+let right, up, dir, eye;
 let programmableValue;
 
 let seed;
@@ -58,6 +63,9 @@ let simulationStep = 0;
 let activeSimulationStep = -1;
 let simulationIterationPaused = false;
 let simulationIteration = 0;
+let activeCameraIndex = -1;
+
+let cameraReference;
 
 const RULES = [
   2023103542460421n, // clouds-5
@@ -86,7 +94,7 @@ const RULES_NAMES = [
 ];
 
 const GRID_EVENTS = [
-  { step: 0, obj: { gridRes: 128, /*seed: 1474531643,*/ area: 22 } }, // GRID_EVENT
+  { step: 0, obj: { gridRes: 128, seed: 1846359466, area: 22 } }, // GRID_EVENT
 ];
 
 const RULE_EVENTS = [
@@ -94,10 +102,15 @@ const RULE_EVENTS = [
 ];
 
 const TIME_EVENTS = [
-  { step: 0, obj: { delta: -50 } }, // TIME_EVENT (paused: false, updateDelay: 200)
+  { step: 25, obj: { delta: 0 } }, // TIME_EVENT (paused: true, updateDelay: 250)
 ];
 
 const CAMERA_EVENTS = [
+  { time: 0, obj: { eye: [133.37, 134.02, 133.47], dirPhi: -2.2577, dirTheta: 2.1886 } }, // CAMERA_EVENT
+  { time: 6250, obj: { eye: [-21.47, 118.41, -7.01], dirPhi: -0.5561, dirTheta: 1.0594, moveEyePhi: -0.6081, moveEyeTheta: 0.9807 } }, // CAMERA_EVENT
+  { time: 10000, obj: { eye: [82.75, 90.20, 93.00], dirPhi: 2.5172, dirTheta: 2.4197, moveEyePhi: -1.0383, moveEyeTheta: 1.1033 } }, // CAMERA_EVENT
+  { time: 15000, obj: { eye: [122.11, 27.74, 129.76], dirPhi: 2.6738, dirTheta: 2.3647, moveEyePhi: 0.0000, moveEyeTheta: 3.0183 } }, // CAMERA_EVENT
+  { time: 20000, obj: { eye: [133.37, 134.02, 133.47], dirPhi: -2.2577, dirTheta: 2.1886 } }, // CAMERA_EVENT
 ];
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
@@ -165,12 +178,14 @@ async function prepareAudio()
 {
   audioContext = new AudioContext();
 
+  console.log("Audio context sample rate: " + audioContext.sampleRate);
+
   let webAudioBuffer = audioContext.createBuffer(2, AUDIO_BUFFER_SIZE, audioContext.sampleRate);
 
   console.log("Max audio length: " + (webAudioBuffer.length / audioContext.sampleRate / 60).toFixed(2) + " min");
 
   let audioBuffer = device.createBuffer({
-    // Size * stereo * sizeof(float)
+    // Size * stereo * sizeof(uint32/float)
     size: AUDIO_BUFFER_SIZE * 2 * 4, 
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC});
 
@@ -195,8 +210,8 @@ async function prepareAudio()
   let pipelineLayout = device.createPipelineLayout({bindGroupLayouts: [bindGroupLayout]});
 
   let commandEncoder = device.createCommandEncoder();
-  
-  let count = Math.ceil(256 / 4);
+
+  let count = Math.ceil(AUDIO_BUFFER_DIM / 4);
   encodeComputePassAndSubmit(commandEncoder,
     await createComputePipeline(shaderModule, pipelineLayout, "audioMain"),
     bindGroup, count, count, count);
@@ -211,7 +226,7 @@ async function prepareAudio()
   let channel0 = webAudioBuffer.getChannelData(0);
   let channel1 = webAudioBuffer.getChannelData(1);
 
-  for (let i = 0; i < AUDIO_BUFFER_SIZE; i++) {
+  for(let i=0; i<AUDIO_BUFFER_SIZE; i++) {
     channel0[i] = audioData[(i << 1) + 0];
     channel1[i] = audioData[(i << 1) + 1];
   }
@@ -234,7 +249,7 @@ async function createGPUResources()
     ]
   });
  
-  // Right, up, fwd, eye, fov, time, simulation step, programmable value/padding
+  // Right, up, dir, eye, fov, time, simulation step, programmable value/padding
   uniformBuffer = device.createBuffer({
     size: 16 * 4, 
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
@@ -288,7 +303,7 @@ function render(time)
 
   currTime = AUDIO ? (audioContext.currentTime * 1000.0) : (time - startTime);
 
-  if(!idle)
+  if(!idle && !recording)
     updateSimulation();
 
   const commandEncoder = device.createCommandEncoder();
@@ -311,7 +326,7 @@ function render(time)
     0.5 / Math.tan(0.5 * FOV * Math.PI / 180.0),
     ...up,
     currTime,
-    ...fwd,
+    ...dir,
     simulationStep,
     ...eye,
     programmableValue
@@ -342,8 +357,9 @@ function setPerformanceTimer(timerName)
 
 function updateSimulation()
 {
-  if(simulationStep == IDLE_AT) {
+  if(simulationStep == RECORDING_AT) {
     idle = true;
+    recording = true;
     return;
   }
 
@@ -373,14 +389,30 @@ function updateCamera()
     let pos = [gridRes * Math.sin(currTime * speed), 0.75 * gridRes * Math.sin(currTime * speed), gridRes * Math.cos(currTime * speed)];
     pos = vec3Add(center, pos);
     setView(pos, vec3Normalize(vec3Add(center, vec3Negate(pos))));
-  } else if(!idle) {
-    // TODO Update camera poses
+    return;
   }
 
-  // Apply 'unsteady factor' to camera target
+  if(!idle && !recording) {
+    if(activeCameraIndex + 1 < CAMERA_EVENTS.length && currTime >= CAMERA_EVENTS[activeCameraIndex + 1].time) {
+      activeCameraIndex++;
+      console.log(`Camera change at ${currTime}`);
+    }
+    if(activeCameraIndex >= 0) {
+      let cam = CAMERA_EVENTS[activeCameraIndex];
+      let deltaTime = (currTime - cam.time) / (activeCameraIndex + 1 < CAMERA_EVENTS.length ? (CAMERA_EVENTS[activeCameraIndex + 1].time - cam.time) : 30000);
+      setView(vec3Add(cam.obj.eye, vec3Scale(cam.obj.moveEye, deltaTime * cam.obj.speed * GLOBAL_CAM_SPEED)), calcUnsteadyDir(cam.obj.dir, cam.obj.unsteady));
+    }
+  }
+}
+
+function calcUnsteadyDir(dir, amp)
+{
   let t = (currTime + simulationStep) * 0.00125;
-  let unsteady = vec3Normalize(vec3Add(fwd, vec3Scale([0.4 * Math.cos(1.3 * t + Math.sin(t * 0.3)), Math.pow(0.3 * Math.cos(t * 0.4), 3.0), 0.5 * Math.cos(t * 1.3 + Math.cos(t))], 0.0007)));
-  setView(eye, unsteady);
+  let unsteady = vec3Normalize(vec3Add(dir, vec3Scale(
+    [ 0.4 * Math.cos(1.3 * t + Math.sin(t * 0.3)),
+      Math.pow(0.3 * Math.cos(t * 0.4), 3.0),
+      0.5 * Math.cos(t * 1.3 + Math.cos(t))], 0.018 * amp)));
+  return unsteady;
 }
 
 function setGrid(obj)
@@ -388,7 +420,7 @@ function setGrid(obj)
   for(let i=0; i<grid.length; i++)
     grid[i] = 0;
 
-  if(rand === undefined || obj.seed != seed) {
+  if(seed === undefined || obj.seed != seed) {
     if(obj.seed === undefined)
       seed = Math.floor(Math.random() * 4294967296);
     else
@@ -414,7 +446,7 @@ function setGrid(obj)
   device.queue.writeBuffer(gridBuffer[0], 0, grid);
   device.queue.writeBuffer(gridBuffer[1], 0, grid);
 
-  console.log(`{ step: ${(SIMULATION_STEP_OFS + simulationStep)}, obj: { gridRes: ${gridRes}, seed: ${seed}, area: ${obj.area} } }, // GRID_EVENT`);
+  recordGridEvent(obj);
 }
 
 function setRules(obj)
@@ -430,7 +462,7 @@ function setRules(obj)
 
   device.queue.writeBuffer(rulesBuffer, 0, rules);
 
-  console.log(`{ step: ${(SIMULATION_STEP_OFS + simulationStep)}, obj: { ruleSet: ${obj.ruleSet} } }, // RULE_EVENT (${RULES_NAMES[obj.ruleSet]})`);
+  recordRulesEvent(obj);
 }
 
 function setTime(obj)
@@ -439,16 +471,56 @@ function setTime(obj)
     simulationIterationPaused = !simulationIterationPaused;
   else
     updateDelay += obj.delta;
- 
-  console.log(`{ step: ${(SIMULATION_STEP_OFS + simulationStep)}, obj: { delta: ${obj.delta} } }, // TIME_EVENT (paused: ${simulationIterationPaused}, updateDelay: ${updateDelay})`);
+
+  recordTimeEvent(obj);
 }
 
 function setView(e, f)
 {
   eye = e;
-  fwd = f;
-  right = vec3Normalize(vec3Cross(fwd, [0, 1, 0]));
-  up = vec3Cross(right, fwd);
+  dir = f;
+  right = vec3Normalize(vec3Cross(dir, [0, 1, 0]));
+  up = vec3Cross(right, dir);
+}
+
+function recordGridEvent(obj)
+{
+  console.log(`{ step: ${(SIMULATION_STEP_OFS + simulationStep)}, obj: { gridRes: ${gridRes}, seed: ${seed}, area: ${obj.area} } }, // GRID_EVENT`);
+}
+
+function recordRulesEvent(obj)
+{
+  console.log(`{ step: ${(SIMULATION_STEP_OFS + simulationStep)}, obj: { ruleSet: ${obj.ruleSet} } }, // RULE_EVENT (${RULES_NAMES[obj.ruleSet]})`);
+}
+
+function recordTimeEvent(obj)
+{
+  console.log(`{ step: ${(SIMULATION_STEP_OFS + simulationStep)}, obj: { delta: ${obj.delta} } }, // TIME_EVENT (paused: ${simulationIterationPaused}, updateDelay: ${updateDelay})`);
+}
+
+function recordCameraEvent(obj)
+{
+  let optional = "";
+
+  if(obj.moveEye !== undefined)
+    optional += `, moveEyePhi: ${Math.atan2(obj.moveEye[1], obj.moveEye[0]).toFixed(4)}, moveEyeTheta: ${Math.acos(obj.moveEye[2]).toFixed(4)}`;
+
+  if(obj.speed !== undefined)
+    optional += `, speed: ${obj.speed}`;
+
+  console.log(`{ time: ${(idle ? startIdleTime.toFixed(0) : currTime.toFixed(0))}, obj: { eye: [${obj.eye[0].toFixed(2)}, ${obj.eye[1].toFixed(2)}, ${obj.eye[2].toFixed(2)}], ` +
+    `dirPhi: ${Math.atan2(obj.dir[1], obj.dir[0]).toFixed(4)}, dirTheta: ${Math.acos(obj.dir[2]).toFixed(4)}${optional} } }, // CAMERA_EVENT`);
+}
+
+function completeCameras()
+{
+  for(let i=0; i<CAMERA_EVENTS.length; i++) {
+    let obj = CAMERA_EVENTS[i].obj;
+    CAMERA_EVENTS[i].obj.dir = vec3FromSpherical(obj.dirTheta, obj.dirPhi)
+    CAMERA_EVENTS[i].obj.moveEye = obj.moveEyeTheta !== undefined ? vec3FromSpherical(obj.moveEyeTheta, obj.moveEyePhi) : [0, 0, 0];
+    CAMERA_EVENTS[i].obj.speed = obj.speed !== undefined ? obj.speed : 1;
+    CAMERA_EVENTS[i].obj.unsteady = obj.unsteady !== undefined ? obj.unsteady : 1;
+  }
 }
 
 function resetView()
@@ -480,6 +552,11 @@ function vec3Normalize(v)
 {
   let invLen = 1.0 / Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
   return [v[0] * invLen, v[1] * invLen, v[2] * invLen];
+}
+
+function vec3FromSpherical(theta, phi)
+{
+  return [Math.sin(theta) * Math.cos(phi), Math.sin(theta) * Math.sin(phi), Math.cos(theta)];
 }
 
 function vec3Transform(v, m)
@@ -525,16 +602,16 @@ async function handleKeyEvent(e)
 
   switch (e.key) {
     case "a":
-      setView(vec3Add(eye, vec3Scale(right, -MOVE_VELOCITY)), fwd);
+      setView(vec3Add(eye, vec3Scale(right, -MOVE_VELOCITY)), dir);
       break;
     case "d":
-      setView(vec3Add(eye, vec3Scale(right, MOVE_VELOCITY)), fwd);
+      setView(vec3Add(eye, vec3Scale(right, MOVE_VELOCITY)), dir);
       break;
     case "w":
-      setView(vec3Add(eye, vec3Scale(fwd, MOVE_VELOCITY)), fwd);
+      setView(vec3Add(eye, vec3Scale(dir, MOVE_VELOCITY)), dir);
       break;
     case "s":
-      setView(vec3Add(eye, vec3Scale(fwd, -MOVE_VELOCITY)), fwd);
+      setView(vec3Add(eye, vec3Scale(dir, -MOVE_VELOCITY)), dir);
       break;
     case "v":
       resetView();
@@ -546,6 +623,10 @@ async function handleKeyEvent(e)
       createPipelines();
       console.log("Shader reloaded");
       break;
+    case "Enter":
+      recording = !recording;
+      console.log("Recording mode " + (recording ? "enabled" : "disabled"));
+      break;
     case " ":
       // Global idle, intro time and simulation time are paused
       idle = !idle;
@@ -555,29 +636,48 @@ async function handleKeyEvent(e)
         else
           startIdleTime = currTime;
       } else {
-        if(AUDIO) {
+        if(AUDIO)
           await audioContext.resume();
-          audioBufferSourceNode.start();
-        } else
+        else
           startTime += currTime - startIdleTime;
       }
-      console.log("Idle mode " + (idle ? "enabled" : "disabled"));
+      console.log("Idle mode " + (idle ? `enabled at ${startIdleTime}` : "disabled"));
       break;
     case "i":
       setGrid({ gridRes: MAX_GRID_RES, seed: seed, area: 4 });
       break;
-    case "#":
-      // Pause simulation (but intro time goes on)
-      setTime({ delta: 0 });
-      break;
-    case "+":
+   case "+":
       setTime({ delta: 50 });
       break;
     case "-":
       setTime({ delta: -50 });
       break;
+    case "#": 
+      setTime({ delta: 0 }); // Pause simulation (but intro time goes on)
+      break;
     case ".":
-      // Reset back to start
+      // Records a STATIC cam
+      recordCameraEvent({ eye: eye, dir: dir }); 
+      break;
+    case "m":
+      // Set start pose of moving cam
+      cameraReference = { eye: eye, dir: dir };
+      console.log("Camera reference pinned");
+      break;
+    case ",":
+      if(cameraReference !== undefined) {
+        // Record start and end pose of moving cam
+        cameraReference.moveEye = vec3Normalize(vec3Add(eye, vec3Negate(cameraReference.eye)));
+        recordCameraEvent(cameraReference);
+        cameraReference = undefined;
+      }
+      break;
+    case ":":
+      console.log("Reset random seed");
+      seed = undefined;
+      break;
+    case ";":
+      console.log("Reset to start");
       startTime = undefined;
       startIdleTime = 0;
       lastSimulationUpdateTime = 0;
@@ -585,7 +685,8 @@ async function handleKeyEvent(e)
       activeSimulationStep = -1;
       simulationIterationPaused = false;
       simulationIteration = 0;
-      // Can not seek audio position, so this will not be in sync anymore after resetting to start :(
+      activeCameraIndex = -1;
+      // TODO Seek audio position. Will not be in sync anymore after resetting to start at the moment :(
       break;
   }
 }
@@ -595,7 +696,7 @@ function handleMouseMoveEvent(e)
   let yaw = -e.movementX * LOOK_VELOCITY;
   let pitch = -e.movementY * LOOK_VELOCITY;
 
-  const currentPitch = Math.acos(fwd[1]);
+  const currentPitch = Math.acos(dir[1]);
   const newPitch = currentPitch - pitch;
   const minPitch = Math.PI / 180.0;
   const maxPitch = 179.0 * Math.PI / 180.0;
@@ -606,7 +707,7 @@ function handleMouseMoveEvent(e)
   if(newPitch > maxPitch)
     pitch = currentPitch - maxPitch;
 
-  setView(eye, vec3Transform(vec3Transform(fwd, axisRotation(right, pitch)), axisRotation([0, 1, 0], yaw)));
+  setView(eye, vec3Transform(vec3Transform(dir, axisRotation(right, pitch)), axisRotation([0, 1, 0], yaw)));
 }
 
 function handleMouseWheelEvent(e)
@@ -614,7 +715,7 @@ function handleMouseWheelEvent(e)
   programmableValue -= e.deltaY * WHEEL_VELOCITY;
 }
 
-function startRender()
+async function startRender()
 {
   if(FULLSCREEN)
     canvas.requestFullscreen();
@@ -626,10 +727,15 @@ function startRender()
     canvas.style.top = 0;
   }
 
-  updateSimulation(0);
+  completeCameras();
 
+  updateSimulation();
+
+  // In case we start in idle or recording mode
   if(!overviewCamera)
     resetView();
+
+  updateCamera();
 
   document.querySelector("button").removeEventListener("click", startRender);
 
@@ -650,8 +756,11 @@ function startRender()
     }
   });
 
-  if(AUDIO && !idle)
+  if(AUDIO) {
     audioBufferSourceNode.start();
+    if(idle)
+      await audioContext.suspend();
+  }
 
   requestAnimationFrame(render);
 }
