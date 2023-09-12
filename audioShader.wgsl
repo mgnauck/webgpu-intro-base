@@ -1,4 +1,4 @@
-const BUFFER_DIM = 128; // Hardcoded :( This must equal the AUDIO_BUFFER_DIM in main.js
+const BUFFER_DIM = 256; // Hardcoded :( This must equal the AUDIO_BUFFER_DIM in main.js
 const BPM = 160.0;
 const PI = 3.141592654;
 const TAU = 6.283185307;

@@ -1,5 +1,5 @@
 const FULLSCREEN = false;
-const AUDIO = false;
+const AUDIO = true;
 
 const IDLE = false;
 const RECORDING = false;
@@ -29,6 +29,11 @@ let recording = RECORDING;
 let overviewCamera = OVERVIEW_CAMERA;
 
 let audioContext;
+let webAudioBuffer;
+let audioBuffer;
+let audioReadBuffer;
+let audioBindgroup;
+let audioPipelineLayout;
 let audioBufferSourceNode;
 
 let device;
@@ -56,8 +61,7 @@ let rules;
 
 let startTime;
 let startIdleTime = 0;
-
-let currTime;
+let currentTime = 0;
 let lastSimulationUpdateTime = 0;
 let simulationStep = 0;
 let activeSimulationStep = -1;
@@ -174,54 +178,56 @@ function encodeRenderPassAndSubmit(commandEncoder, passDescriptor, pipeline, bin
   passEncoder.end();
 }
 
-async function prepareAudio()
+async function createAudioResources()
 {
   audioContext = new AudioContext();
-
   console.log("Audio context sample rate: " + audioContext.sampleRate);
 
-  let webAudioBuffer = audioContext.createBuffer(2, AUDIO_BUFFER_SIZE, audioContext.sampleRate);
-
+  webAudioBuffer = audioContext.createBuffer(2, AUDIO_BUFFER_SIZE, audioContext.sampleRate);
   console.log("Max audio length: " + (webAudioBuffer.length / audioContext.sampleRate / 60).toFixed(2) + " min");
 
-  let audioBuffer = device.createBuffer({
+  audioBuffer = device.createBuffer({
     // Size * stereo * sizeof(uint32/float)
     size: AUDIO_BUFFER_SIZE * 2 * 4, 
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC});
 
-  let bindGroupLayout = device.createBindGroupLayout({
+  let audioBindGroupLayout = device.createBindGroupLayout({
     entries: [{
       binding: 0, 
       visibility: GPUShaderStage.COMPUTE, buffer: {type: "storage"}
     }]});
 
-  let bindGroup = device.createBindGroup({
-    layout: bindGroupLayout,
+  audioBindGroup = device.createBindGroup({
+    layout: audioBindGroupLayout,
     entries: [{
       binding: 0,
       resource: {buffer: audioBuffer}
     }]});
 
-  let readBuffer = device.createBuffer({
+  audioReadBuffer = device.createBuffer({
     size: AUDIO_BUFFER_SIZE * 2 * 4,
     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST});
 
-  let shaderModule = device.createShaderModule({code: await loadTextFile("audioShader.wgsl")});
-  let pipelineLayout = device.createPipelineLayout({bindGroupLayouts: [bindGroupLayout]});
+  audioPipelineLayout = device.createPipelineLayout({bindGroupLayouts: [audioBindGroupLayout]});
+}
+
+async function renderAudio()
+{
+  let shaderCode = await loadTextFile("audioShader.wgsl");
+  let shaderModule = device.createShaderModule({code: shaderCode});
+  let pipeline = await createComputePipeline(shaderModule, audioPipelineLayout, "audioMain");
 
   let commandEncoder = device.createCommandEncoder();
 
   let count = Math.ceil(AUDIO_BUFFER_DIM / 4);
-  encodeComputePassAndSubmit(commandEncoder,
-    await createComputePipeline(shaderModule, pipelineLayout, "audioMain"),
-    bindGroup, count, count, count);
+  encodeComputePassAndSubmit(commandEncoder, pipeline, audioBindGroup, count, count, count);
 
-  commandEncoder.copyBufferToBuffer(audioBuffer, 0, readBuffer, 0, AUDIO_BUFFER_SIZE * 2 * 4);
+  commandEncoder.copyBufferToBuffer(audioBuffer, 0, audioReadBuffer, 0, AUDIO_BUFFER_SIZE * 2 * 4);
 
   device.queue.submit([commandEncoder.finish()]);
 
-  await readBuffer.mapAsync(GPUMapMode.READ);
-  let audioData = new Float32Array(readBuffer.getMappedRange());
+  await audioReadBuffer.mapAsync(GPUMapMode.READ);
+  let audioData = new Float32Array(audioReadBuffer.getMappedRange());
 
   let channel0 = webAudioBuffer.getChannelData(0);
   let channel1 = webAudioBuffer.getChannelData(1);
@@ -231,14 +237,45 @@ async function prepareAudio()
     channel1[i] = audioData[(i << 1) + 1];
   }
 
-  readBuffer.unmap();
+  audioReadBuffer.unmap();
 
+  console.log("Rendered audio");
+}
+
+async function suspendAudio()
+{
+  if(audioContext.state === "running") {
+    await audioContext.suspend();
+    audioBufferSourceNode.stop();
+  }
+}
+
+async function playAudio()
+{
   audioBufferSourceNode = audioContext.createBufferSource();
   audioBufferSourceNode.buffer = webAudioBuffer;
   audioBufferSourceNode.connect(audioContext.destination);
+ 
+  if(audioContext.state === "suspended")
+    await audioContext.resume();
+  
+  audioBufferSourceNode.start(0, currentTime / 1000.0);
 }
 
-async function createGPUResources()
+async function reloadAudio()
+{
+  if(!idle)
+    await suspendAudio();
+  
+  await renderAudio();
+  
+  if(!idle)
+    await playAudio();
+
+  console.log("Audio reloaded");
+}
+
+async function createRenderResources()
 {
   let bindGroupLayout = device.createBindGroupLayout({
     entries: [ 
@@ -301,7 +338,7 @@ function render(time)
   if(startTime === undefined)
     startTime = AUDIO ? (audioContext.currentTime * 1000.0) : time;
 
-  currTime = AUDIO ? (audioContext.currentTime * 1000.0) : (time - startTime);
+  currentTime = AUDIO ? (audioContext.currentTime * 1000.0 - startTime) : (time - startTime);
 
   if(!idle && !recording)
     updateSimulation();
@@ -309,7 +346,7 @@ function render(time)
   const commandEncoder = device.createCommandEncoder();
  
   // TODO Distribute one simulation iteration across different frames (within updateDelay 'budget')
-  if(!idle && currTime - lastSimulationUpdateTime > updateDelay) {
+  if(!idle && currentTime - lastSimulationUpdateTime > updateDelay) {
     if(!simulationIterationPaused) {
       const count = Math.ceil(gridRes / 4);
       encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], count, count, count); 
@@ -325,7 +362,7 @@ function render(time)
     ...right,
     0.5 / Math.tan(0.5 * FOV * Math.PI / 180.0),
     ...up,
-    currTime,
+    currentTime,
     ...dir,
     simulationStep,
     ...eye,
@@ -386,20 +423,20 @@ function updateCamera()
   if(overviewCamera) {
     let speed = 0.00025;
     let center = vec3Scale([gridRes, gridRes, gridRes], 0.5);
-    let pos = [gridRes * Math.sin(currTime * speed), 0.75 * gridRes * Math.sin(currTime * speed), gridRes * Math.cos(currTime * speed)];
+    let pos = [gridRes * Math.sin(currentTime * speed), 0.75 * gridRes * Math.sin(currentTime * speed), gridRes * Math.cos(currentTime * speed)];
     pos = vec3Add(center, pos);
     setView(pos, vec3Normalize(vec3Add(center, vec3Negate(pos))));
     return;
   }
 
   if(!idle && !recording) {
-    if(activeCameraIndex + 1 < CAMERA_EVENTS.length && currTime >= CAMERA_EVENTS[activeCameraIndex + 1].time) {
+    if(activeCameraIndex + 1 < CAMERA_EVENTS.length && currentTime >= CAMERA_EVENTS[activeCameraIndex + 1].time) {
       activeCameraIndex++;
-      console.log(`Camera change at ${currTime}`);
+      console.log(`Camera change at ${currentTime.toFixed(2)}`);
     }
     if(activeCameraIndex >= 0) {
       let cam = CAMERA_EVENTS[activeCameraIndex];
-      let deltaTime = (currTime - cam.time) / (activeCameraIndex + 1 < CAMERA_EVENTS.length ? (CAMERA_EVENTS[activeCameraIndex + 1].time - cam.time) : 30000);
+      let deltaTime = (currentTime - cam.time) / (activeCameraIndex + 1 < CAMERA_EVENTS.length ? (CAMERA_EVENTS[activeCameraIndex + 1].time - cam.time) : 30000);
       setView(vec3Add(cam.obj.eye, vec3Scale(cam.obj.moveEye, deltaTime * cam.obj.speed * GLOBAL_CAM_SPEED)), calcUnsteadyDir(cam.obj.dir, cam.obj.unsteady));
     }
   }
@@ -407,7 +444,7 @@ function updateCamera()
 
 function calcUnsteadyDir(dir, amp)
 {
-  let t = (currTime + simulationStep) * 0.00125;
+  let t = (currentTime + simulationStep) * 0.00125;
   let unsteady = vec3Normalize(vec3Add(dir, vec3Scale(
     [ 0.4 * Math.cos(1.3 * t + Math.sin(t * 0.3)),
       Math.pow(0.3 * Math.cos(t * 0.4), 3.0),
@@ -508,7 +545,7 @@ function recordCameraEvent(obj)
   if(obj.speed !== undefined)
     optional += `, speed: ${obj.speed}`;
 
-  console.log(`{ time: ${(idle ? startIdleTime.toFixed(0) : currTime.toFixed(0))}, obj: { eye: [${obj.eye[0].toFixed(2)}, ${obj.eye[1].toFixed(2)}, ${obj.eye[2].toFixed(2)}], ` +
+  console.log(`{ time: ${(idle ? startIdleTime.toFixed(0) : currentTime.toFixed(0))}, obj: { eye: [${obj.eye[0].toFixed(2)}, ${obj.eye[1].toFixed(2)}, ${obj.eye[2].toFixed(2)}], ` +
     `dirPhi: ${Math.atan2(obj.dir[1], obj.dir[0]).toFixed(4)}, dirTheta: ${Math.acos(obj.dir[2]).toFixed(4)}${optional} } }, // CAMERA_EVENT`);
 }
 
@@ -592,14 +629,8 @@ function axisRotation(axis, angle)
           0, 0, 0, 1]
 }
 
-async function handleKeyEvent(e)
-{    
-  if(e.key !== " " && !isNaN(e.key))
-  {
-    setRules({ ruleSet: parseInt(e.key, 10) });
-    return;
-  }
-
+function handleCameraControlEvent(e)
+{
   switch (e.key) {
     case "a":
       setView(vec3Add(eye, vec3Scale(right, -MOVE_VELOCITY)), dir);
@@ -613,6 +644,18 @@ async function handleKeyEvent(e)
     case "s":
       setView(vec3Add(eye, vec3Scale(dir, -MOVE_VELOCITY)), dir);
       break;
+  } 
+}
+
+async function handleKeyEvent(e)
+{    
+  if(e.key !== " " && !isNaN(e.key))
+  {
+    setRules({ ruleSet: parseInt(e.key, 10) });
+    return;
+  }
+
+  switch (e.key) {
     case "v":
       resetView();
       break;
@@ -621,7 +664,7 @@ async function handleKeyEvent(e)
       break;
     case "l":
       createPipelines();
-      console.log("Shader reloaded");
+      console.log("Content shader reloaded");
       break;
     case "Enter":
       recording = !recording;
@@ -632,21 +675,21 @@ async function handleKeyEvent(e)
       idle = !idle;
       if(idle) {
         if(AUDIO)
-          await audioContext.suspend();
+          await suspendAudio();
         else
-          startIdleTime = currTime;
+          startIdleTime = currentTime;
       } else {
         if(AUDIO)
-          await audioContext.resume();
+          await playAudio();
         else
-          startTime += currTime - startIdleTime;
+          startTime += currentTime - startIdleTime;
       }
-      console.log("Idle mode " + (idle ? `enabled at ${startIdleTime}` : "disabled"));
+      console.log("Idle mode " + (idle ? "enabled" : "disabled"));
       break;
     case "i":
       setGrid({ gridRes: MAX_GRID_RES, seed: seed, area: 4 });
       break;
-   case "+":
+    case "+":
       setTime({ delta: 50 });
       break;
     case "-":
@@ -673,20 +716,33 @@ async function handleKeyEvent(e)
       }
       break;
     case ":":
-      console.log("Reset random seed");
       seed = undefined;
+      console.log("Reset random seed");
       break;
-    case ";":
-      console.log("Reset to start");
+    case ">":
+      // Re-render and restart audio from last audio position
+      if(AUDIO)
+        reloadAudio();
+      break;
+    case "<":
+      console.log("Reset everything to start");
+      if(AUDIO) {
+        if(!idle)
+          await suspendAudio();
+        await renderAudio();
+      }
+      updateDelay = DEFAULT_UPDATE_DELAY;
       startTime = undefined;
       startIdleTime = 0;
+      currentTime = 0;
       lastSimulationUpdateTime = 0;
       simulationStep = 0;
       activeSimulationStep = -1;
       simulationIterationPaused = false;
       simulationIteration = 0;
       activeCameraIndex = -1;
-      // TODO Seek audio position. Will not be in sync anymore after resetting to start at the moment :(
+      if(AUDIO && !idle)
+        await playAudio();
       break;
   }
 }
@@ -739,6 +795,8 @@ async function startRender()
 
   document.querySelector("button").removeEventListener("click", startRender);
 
+  document.addEventListener("keydown", handleKeyEvent);
+
   canvas.addEventListener("click", async () => {
     if(!document.pointerLockElement)
       await canvas.requestPointerLock({unadjustedMovement: true});
@@ -746,20 +804,21 @@ async function startRender()
 
   document.addEventListener("pointerlockchange", () => {
     if(document.pointerLockElement === canvas) {
-      document.addEventListener("keydown", handleKeyEvent);
+      document.addEventListener("keydown", handleCameraControlEvent);
       canvas.addEventListener("mousemove", handleMouseMoveEvent);
       canvas.addEventListener("wheel", handleMouseWheelEvent);
     } else {
-      document.removeEventListener("keydown", handleKeyEvent);
+      document.removeEventListener("keydown", handleCameraControlEvent);
       canvas.removeEventListener("mousemove", handleMouseMoveEvent);
       canvas.removeEventListener("wheel", handleMouseWheelEvent);
     }
   });
 
-  if(AUDIO) {
-    audioBufferSourceNode.start();
-    if(idle)
-      await audioContext.suspend();
+  if(AUDIO && !idle) {
+    await playAudio();
+
+    // Daniel: Set to reload audio every 5s
+    //setInterval(reloadAudio, 5000);
   }
 
   requestAnimationFrame(render);
@@ -778,8 +837,10 @@ async function main()
   if(!device)
     throw new Error("Failed to request logical device.");
 
-  if(AUDIO)
-    await prepareAudio();
+  if(AUDIO) {
+    await createAudioResources();
+    await renderAudio();
+  }
 
   // Grid mul + grid
   grid = new Uint32Array(3 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
@@ -787,7 +848,7 @@ async function main()
   // State count + alive rules + birth rules
   rules = new Uint32Array(1 + 2 * 27);
 
-  await createGPUResources();
+  await createRenderResources();
   await createPipelines();
 
   document.body.innerHTML = "<button>CLICK<canvas style='width:0;cursor:none'>";
