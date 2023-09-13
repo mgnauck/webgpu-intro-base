@@ -12,8 +12,7 @@ const CANVAS_WIDTH = 1024;
 const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 const FOV = 50.0;
 
-const AUDIO_BUFFER_DIM = 256;
-const AUDIO_BUFFER_SIZE = AUDIO_BUFFER_DIM ** 3; // 4096*4096
+const AUDIO_BUFFER_SIZE = 4096 * 4096;
 
 const MAX_GRID_RES = 128;
 const DEFAULT_UPDATE_DELAY = 250;
@@ -106,7 +105,7 @@ const RULE_EVENTS = [
 ];
 
 const TIME_EVENTS = [
-  { step: 25, obj: { delta: 0 } }, // TIME_EVENT (paused: true, updateDelay: 250)
+  //{ step: 25, obj: { delta: 0 } }, // TIME_EVENT (paused: true, updateDelay: 250)
 ];
 
 const CAMERA_EVENTS = [
@@ -187,39 +186,46 @@ async function createAudioResources()
   console.log("Max audio length: " + (webAudioBuffer.length / audioContext.sampleRate / 60).toFixed(2) + " min");
 
   audioBuffer = device.createBuffer({
-    // Size * stereo * sizeof(uint32/float)
+    // Buffer size * stereo * 4 bytes (float/uint32)
     size: AUDIO_BUFFER_SIZE * 2 * 4, 
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC});
 
+  let audioUniformBuffer = device.createBuffer({
+    // (buffer dimension + sample rate) * 4 bytes (uint32)
+    size: 2 * 4,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
+
   let audioBindGroupLayout = device.createBindGroupLayout({
-    entries: [{
-      binding: 0, 
-      visibility: GPUShaderStage.COMPUTE, buffer: {type: "storage"}
-    }]});
+    entries: [
+      {binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: {type: "uniform"}},
+      {binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: {type: "storage"}}
+    ]});
 
   audioBindGroup = device.createBindGroup({
     layout: audioBindGroupLayout,
-    entries: [{
-      binding: 0,
-      resource: {buffer: audioBuffer}
-    }]});
+    entries: [
+      {binding: 0, resource: {buffer: audioUniformBuffer}},
+      {binding: 1, resource: {buffer: audioBuffer}}
+    ]});
 
   audioReadBuffer = device.createBuffer({
     size: AUDIO_BUFFER_SIZE * 2 * 4,
     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST});
 
   audioPipelineLayout = device.createPipelineLayout({bindGroupLayouts: [audioBindGroupLayout]});
+
+  device.queue.writeBuffer(audioUniformBuffer, 0, new Uint32Array([Math.ceil(Math.cbrt(AUDIO_BUFFER_SIZE)), audioContext.sampleRate]));
 }
 
 async function renderAudio()
 {
-  let shaderCode = await loadTextFile("audioShader.wgsl");
+  let shaderCode = await loadTextFile("audio.wgsl");
   let shaderModule = device.createShaderModule({code: shaderCode});
   let pipeline = await createComputePipeline(shaderModule, audioPipelineLayout, "audioMain");
 
   let commandEncoder = device.createCommandEncoder();
 
-  let count = Math.ceil(AUDIO_BUFFER_DIM / 4);
+  let count = Math.ceil(Math.cbrt(AUDIO_BUFFER_SIZE) / 4);
   encodeComputePassAndSubmit(commandEncoder, pipeline, audioBindGroup, count, count, count);
 
   commandEncoder.copyBufferToBuffer(audioBuffer, 0, audioReadBuffer, 0, AUDIO_BUFFER_SIZE * 2 * 4);
@@ -272,7 +278,7 @@ async function reloadAudio()
   if(!idle)
     await playAudio();
 
-  console.log("Audio reloaded");
+  console.log("Audio shader reloaded/re-rendered audio");
 }
 
 async function createRenderResources()
@@ -326,7 +332,7 @@ async function createRenderResources()
 
 async function createPipelines()
 {
-  let shaderCode = await loadTextFile("contentShader.wgsl");
+  let shaderCode = await loadTextFile("visual.wgsl");
   let shaderModule = device.createShaderModule({code: shaderCode});
 
   computePipeline = await createComputePipeline(shaderModule, pipelineLayout, "computeMain");
@@ -335,10 +341,13 @@ async function createPipelines()
 
 function render(time)
 {
-  if(startTime === undefined)
-    startTime = AUDIO ? (audioContext.currentTime * 1000.0) : time;
+  if(AUDIO)
+    time = audioContext.currentTime * 1000;
 
-  currentTime = AUDIO ? (audioContext.currentTime * 1000.0 - startTime) : (time - startTime);
+  if(startTime === undefined)
+    startTime = time;
+
+  currentTime = time - startTime;
 
   if(!idle && !recording)
     updateSimulation();
@@ -458,10 +467,7 @@ function setGrid(obj)
     grid[i] = 0;
 
   if(seed === undefined || obj.seed != seed) {
-    if(obj.seed === undefined)
-      seed = Math.floor(Math.random() * 4294967296);
-    else
-      seed = obj.seed;
+    seed = obj.seed === undefined ? Math.floor(Math.random() * 4294967296) : obj.seed;
     rand = splitmix32(seed);
   }
 
@@ -664,7 +670,7 @@ async function handleKeyEvent(e)
       break;
     case "l":
       createPipelines();
-      console.log("Content shader reloaded");
+      console.log("Visual shader reloaded");
       break;
     case "Enter":
       recording = !recording;
@@ -731,6 +737,7 @@ async function handleKeyEvent(e)
           await suspendAudio();
         await renderAudio();
       }
+      seed = undefined;
       updateDelay = DEFAULT_UPDATE_DELAY;
       startTime = undefined;
       startIdleTime = 0;

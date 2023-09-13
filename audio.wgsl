@@ -1,4 +1,9 @@
-const BUFFER_DIM = 256; // Hardcoded :( This must equal the AUDIO_BUFFER_DIM in main.js
+struct AudioParameters
+{
+  bufferDim: u32, // Cubic root of audio buffer size to match grid dimension of compute shader invocations
+  sampleRate: u32 // Sample rate as per WebAudio context
+}
+
 const BPM = 160.0;
 const PI = 3.141592654;
 const TAU = 6.283185307;
@@ -43,19 +48,20 @@ fn hihat(time: f32) -> f32
   return amp * noise(time * 110.0).x;
 }
 
-@group(0) @binding(0) var<storage, read_write> buffer: array<vec2f>;
+@group(0) @binding(0) var<uniform> params: AudioParameters;
+@group(0) @binding(1) var<storage, read_write> buffer: array<vec2f>;
 
 @compute @workgroup_size(4, 4, 4)
 fn audioMain(@builtin(global_invocation_id) globalId: vec3u)
 {
-  if(globalId.x >= BUFFER_DIM || globalId.y >= BUFFER_DIM || globalId.z >= BUFFER_DIM) {
+  if(globalId.x >= params.bufferDim || globalId.y >= params.bufferDim || globalId.z >= params.bufferDim) {
     return;
   }
 
   // Calculate current sample from given buffer id
-  let sample = dot(globalId, vec3u(1, BUFFER_DIM, BUFFER_DIM * BUFFER_DIM));
+  let sample = dot(globalId, vec3u(1, params.bufferDim, params.bufferDim * params.bufferDim));
   
-  let time = f32(sample) / 44100.0;
+  let time = f32(sample) / f32(params.sampleRate);
   let beat = timeToBeat(time);
 
   // Samples are calculated in mono and then written to left/right
