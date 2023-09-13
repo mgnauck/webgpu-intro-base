@@ -67,7 +67,7 @@ fn audioMain(@builtin(global_invocation_id) globalId: vec3u)
   // Samples are calculated in mono and then written to left/right
 
   // Kick
-  var result = vec2f(0.6 * kick(beatToTime(beat % 1.0)));
+  //var result = vec2f(0.6 * kick(beatToTime(beat % 1.0)));
 
   // Hihat
   result += vec2f(0.3 * hihat(beatToTime((beat + 0.5) % 1.0)));

@@ -235,8 +235,8 @@ async function renderAudio()
   await audioReadBuffer.mapAsync(GPUMapMode.READ);
   let audioData = new Float32Array(audioReadBuffer.getMappedRange());
 
-  let channel0 = webAudioBuffer.getChannelData(0);
-  let channel1 = webAudioBuffer.getChannelData(1);
+  let channel0 = webAudioBuffer.getChannelData(0); // right
+  let channel1 = webAudioBuffer.getChannelData(1); // left
 
   for(let i=0; i<AUDIO_BUFFER_SIZE; i++) {
     channel0[i] = audioData[(i << 1) + 0];
@@ -828,7 +828,7 @@ async function startRender()
     //setInterval(reloadAudio, 5000);
   }
 
-  requestAnimationFrame(render);
+  // requestAnimationFrame(render);
 }
 
 async function main()
