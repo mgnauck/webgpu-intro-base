@@ -1,6 +1,9 @@
 const FULLSCREEN = false;
 const AUDIO = true;
 
+const DISABLE_RENDERING = false;
+const AUDIO_RELOAD_INTERVAL = 0; // Reload interval in seconds, 0 = disabled
+
 const IDLE = false;
 const RECORDING = false;
 const RECORDING_AT = -1; // Switch to recording mode at given step
@@ -824,11 +827,12 @@ async function startRender()
   if(AUDIO && !idle) {
     await playAudio();
 
-    // Daniel: Set to reload audio every 5s
-    //setInterval(reloadAudio, 5000);
+    if(AUDIO_RELOAD_INTERVAL > 0)
+      setInterval(reloadAudio, AUDIO_RELOAD_INTERVAL);
   }
 
-  // requestAnimationFrame(render);
+  if(!DISABLE_RENDERING)
+    requestAnimationFrame(render);
 }
 
 async function main()

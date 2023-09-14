@@ -4,24 +4,11 @@ struct AudioParameters
   sampleRate: u32 // Sample rate as per WebAudio context
 }
 
-const BPM = 160.0;
+const BPM = 120.0;
 const PI = 3.141592654;
 const TAU = 6.283185307;
-
-fn timeToBeat(t: f32) -> f32
-{
-  return t / 60.0 * BPM;
-}
-
-fn beatToTime(b: f32) -> f32
-{
-  return b / BPM * 60.0;
-}
-
-fn sine(phase: f32) -> f32
-{
-  return sin(TAU * phase);
-}
+const TIME_PER_BEAT = 60.0 / BPM / 4.0;
+const TIME_PER_PATTERN = 60.0 / BPM * 4.0;
 
 // Suboptimal random (ripped from somewhere)
 fn rand(co: vec2f) -> f32
@@ -35,18 +22,94 @@ fn noise(phase: f32) -> vec4f
   return vec4f(rand(uv));
 }
 
-fn kick(time: f32) -> f32
+fn adsr(time: f32, att: f32, dec: f32, sus: f32, susL: f32, rel : f32) -> f32
 {
-  let amp = exp(-5.0 * time);
-  let phase = 120.0 * time - 15.0 * exp(-60.0 * time);
-  return amp * sine(phase);
+  var amp = 0.f;
+  if(time <= att) 
+  {
+    amp = time / att;
+  } 
+  else if(time <= att + dec)
+  {
+    amp = ((susL - 1.0) / dec) * (time - att) + 1.0;
+  }
+  else if(time <= att + dec + sus)
+  {
+    amp = susL;
+  }
+  else if(time <= att + dec + sus + rel)
+  {
+    amp = -(susL / rel) * (time - att - dec - sus) + susL;
+  }
+
+  return amp;
 }
 
-fn hihat(time: f32) -> f32
+fn bass(time: f32, freq: f32) -> f32
 {
-  let amp = exp(-40.0 * time);
-  return amp * noise(time * 110.0).x;
+  var pitch = freq + adsr(time, 0.2f, 0.80f, 0.1f, 0.2f, 0.1f) * 5.f;
+  var env = adsr(time, 0.01f, 0.396f, 0.01f, 0.1f, 0.1f);
+  var bass = sin(time * TAU * pitch);
+
+  return bass * env;
 }
+
+fn hihat(time: f32, freq: f32) -> f32
+{
+  let amp = exp(-70.0 * time);
+  return amp * noise(time * freq).x;
+}
+
+fn kick(time: f32, freq: f32) -> f32
+{
+  var pitch = freq + adsr(time, 0.01f, 0.30f, 0.01f, 0.1f, 0.01f) * 65.f;
+  var env = adsr(time, 0.01f, 0.196f, 0.01f, 0.0f, 0.001f);
+  var kick = sin(time * TAU * pitch);
+  
+  return kick * env;
+}
+
+// TBD relevant note constants below
+const D4 = 42;
+const B3 = 39;
+const A3 = 37;
+const G3 = 35;
+const F3 = 33;
+const A2 = 25;
+const F1 = 9;
+const D1 = 6;
+
+// convert a note to it's frequency representation
+fn noteToFreq(note: u32) -> f32
+{
+  return (440.0 / 32.0) * pow(2.0, (f32(note) - 9.0) / 12.0);
+}
+
+fn pling(time: f32, freq : f32) -> f32
+{
+  return sin(time * TAU * freq) * exp(-6 * time);
+}
+
+// Workaround to support euclidean modulo (glsl)
+// https://github.com/gpuweb/gpuweb/issues/3987#issuecomment-1528783750
+fn modulo_euclidean(a: f32, b: f32) -> f32 
+{
+	let m = a % b;
+  return select(m, m + abs(b), m < 0.0);
+}
+
+// this should be rewritten into something more generalized
+const kickPatternLength = 16;
+const kickPattern = array<u32, kickPatternLength>
+(D1,0,0,0, D1,0,D1,0, 0,0,D1,0, D1,0,0,D1);
+
+const hihatPatternLength = 16;
+const hihatPattern = array<u32, hihatPatternLength>
+(0,0,D1,0, 0,0,D1,0, 0,0,D1,0, 0,0,D1,D1);
+
+const bassPatternLength = 16;
+const bassPattern = array<u32, bassPatternLength>
+(0,0,F3,0, 0,0,F3,0, 0,F3,0,0, F3,G3,A3,B3);
 
 @group(0) @binding(0) var<uniform> params: AudioParameters;
 @group(0) @binding(1) var<storage, read_write> buffer: array<vec2f>;
@@ -54,23 +117,57 @@ fn hihat(time: f32) -> f32
 @compute @workgroup_size(4, 4, 4)
 fn audioMain(@builtin(global_invocation_id) globalId: vec3u)
 {
+  // Make sure workgroups align properly with buffer size, i.e. do not run beyond buffer dimension
   if(globalId.x >= params.bufferDim || globalId.y >= params.bufferDim || globalId.z >= params.bufferDim) {
     return;
   }
 
   // Calculate current sample from given buffer id
   let sample = dot(globalId, vec3u(1, params.bufferDim, params.bufferDim * params.bufferDim));
-  
   let time = f32(sample) / f32(params.sampleRate);
-  let beat = timeToBeat(time);
 
   // Samples are calculated in mono and then written to left/right
+  var result = vec2(0.0);
 
-  // Kick
-  //var result = vec2f(0.6 * kick(beatToTime(beat % 1.0)));
+  // kick
+  // FIXME: generalize pattern stuff
+  for(var i=0;i<kickPatternLength;i++)
+  {
+    let note = kickPattern[i];
+    let noteFreq = noteToFreq(note);
+    let beatTime = f32(i) * TIME_PER_BEAT;
+    let noteTime = modulo_euclidean(time - beatTime, TIME_PER_PATTERN);
+    let noteOn = sign(f32(note));
 
-  // Hihat
-  result += vec2f(0.3 * hihat(beatToTime((beat + 0.5) % 1.0)));
+    result += vec2f(0.5 * kick(noteTime, noteFreq) * noteOn);
+  }
+
+  // hihat
+  // FIXME: generalize pattern stuff
+  for(var i=0;i<hihatPatternLength;i++)
+  {
+    let note = hihatPattern[i];
+    let noteFreq = noteToFreq(note);
+    let beatTime = f32(i) * TIME_PER_BEAT;
+    let noteTime = modulo_euclidean(time - beatTime, TIME_PER_PATTERN);
+    let noteOn = sign(f32(note));
+
+    // FIXME: hihat doesn't really have a frequency right now
+    result += vec2f(0.15 * hihat(noteTime, noteFreq) * noteOn);
+  }
+
+  // bass
+  // FIXME: generalize pattern stuff
+  for(var i=0;i<bassPatternLength;i++)
+  {
+    let note = bassPattern[i];
+    let noteFreq = noteToFreq(note);
+    let beatTime = f32(i) * TIME_PER_BEAT;
+    let noteTime = modulo_euclidean(time - beatTime, TIME_PER_PATTERN);
+    let noteOn = sign(f32(note));
+
+    result += vec2f(0.25 * bass(noteTime, noteFreq) * noteOn);
+  }
 
   // Write 2 floats between -1 and 1 to output buffer (stereo)
   buffer[sample] = clamp(result, vec2f(-1), vec2f(1));
