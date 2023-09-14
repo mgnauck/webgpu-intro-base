@@ -28,7 +28,8 @@ struct Hit
   norm: vec3f,
   state: u32,
   dist: f32,
-  maxDist: f32
+  maxDist: f32,
+  col: vec3f
 }
 
 const WIDTH = 1024;
@@ -118,6 +119,18 @@ fn maxComp(v: vec3f) -> f32
   return max(v.x, max(v.y, v.z));
 }
 
+fn intersectPlane(p: vec3f, norm: vec3f, ori: vec3f, dir: vec3f, t: ptr<function, f32>) -> bool
+{
+  let denominator = dot(norm, dir);
+  if(abs(denominator) > EPSILON) {
+    *t = dot((p - ori), norm) / denominator;
+    if(*t > EPSILON) {
+      return true;
+    }
+  }
+  return false;
+}
+
 fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, invDir: vec3f, tmin: ptr<function, f32>, tmax: ptr<function, f32>) -> bool
 {
   let t0 = (minExt - ori) * invDir;
@@ -197,8 +210,8 @@ fn calcOcclusion(pos: vec3f, index: i32, norm: vec3i) -> f32
 
 fn shade(pos: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> vec3f
 {
-  /*// Wireframe, better add AA
-  let border = vec3f(0.5 - 0.05);
+  // Wireframe, better add AA
+  /*let border = vec3f(0.5 - 0.05);
   let wire = (vec3f(1) - abs((*hit).norm)) * abs(fract(pos) - vec3f(0.5));
 
   if(any(vec3<bool>(step(border, wire)))) {
@@ -226,8 +239,8 @@ fn shade(pos: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> vec3f
 fn background(ori: vec3f, dir: vec3f) -> vec3f
 {
   // TODO Make much better background
-  let a = (1.01 - (0.4 + dir.y * 0.6));
-  return vec3f(0.00003) / (a * a); 
+  let a = 0.5 + abs(dir.y) * 0.5;
+  return vec3f(0.3, 0.3, 0.6) * a * 0.015; 
 }
 
 // https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
@@ -248,30 +261,46 @@ fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec
   return vec4f(pos[vertexIndex], 0, 1);
 }
 
+fn trace(ori: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> bool
+{
+  let invDir = 1.0 / dir;
+  var tmin: f32;
+  var tmax: f32;
+  if(intersectAabb(vec3f(0), vec3f(f32(grid.mul.y)), ori, invDir, &tmin, &tmax)) {
+    tmin = max(tmin - EPSILON, 0.0);
+    (*hit).maxDist = tmax - EPSILON - tmin;
+    if(traverseGrid(ori + tmin * dir, invDir, (*hit).maxDist, hit)) {
+      (*hit).col = shade(ori + (tmin + (*hit).dist) * dir, dir, hit);
+      return true;
+    }
+  }
+  return false;
+}
+
 @fragment
 fn fragmentMain(@builtin(position) position: vec4f) -> @location(0) vec4f
 {
   // Framebuffer y-down in webgpu
-  let origin = uniforms.eye;
+  let ori = uniforms.eye;
   let dirEyeSpace = normalize(vec3f((position.xy - vec2f(WIDTH, HEIGHT) * 0.5) / f32(HEIGHT), uniforms.tanHalfFov));
   let dir = uniforms.right * dirEyeSpace.x - uniforms.up * dirEyeSpace.y + uniforms.forward * dirEyeSpace.z;
 
-  var col = background(origin, dir);
-  let invDir = 1.0 / dir;
-  var tmin: f32;
-  var tmax: f32;
+  var col = background(ori, dir);
   var hit: Hit;
 
-  if(intersectAabb(vec3f(0), vec3f(f32(grid.mul.y)), origin, invDir, &tmin, &tmax)) {
-    tmin = max(tmin - EPSILON, 0.0);
-    hit.maxDist = tmax - EPSILON - tmin;
-    if(traverseGrid(origin + tmin * dir, invDir, hit.maxDist, &hit)) {
-      col = shade(origin + (tmin + hit.dist) * dir, dir, &hit);
-    } /*else
-    {
-      // Visualize grid box
-      col = vec3f(0.005);
-    }*/
+  if(trace(ori, dir, &hit)) {
+    col = hit.col;
+  } else {
+    var t: f32;
+    let norm = vec3f(0.0, 1.0, 0.0);
+    if(intersectPlane(vec3f(0.0, -30.0, 0.0), norm, ori, dir, &t)) {
+      let newDir = normalize(reflect(dir, norm));
+      var newOri = ori + t * dir;
+      newOri += newDir * vec3f(4.3 * sin(newOri.x + uniforms.time * 0.0015), 0.0, 1.2 * cos(newOri.y + uniforms.time * 0.002));
+      if(trace(newOri, newDir, &hit)) {
+        col += hit.col * vec3f(0.3);
+      }
+    }
   }
 
   // Amplify

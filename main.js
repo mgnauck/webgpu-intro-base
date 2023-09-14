@@ -1,14 +1,14 @@
 const FULLSCREEN = false;
-const AUDIO = true;
+const AUDIO = false;
 
 const DISABLE_RENDERING = false;
 const AUDIO_RELOAD_INTERVAL = 0; // Reload interval in seconds, 0 = disabled
 
 const IDLE = false;
-const RECORDING = true;
+const RECORDING = false;
 const RECORDING_AT = -1; // Switch to recording mode at given step
 const SIMULATION_STEP_OFS = 0;
-const OVERVIEW_CAMERA = false;
+const OVERVIEW_CAMERA = true;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 1024;
@@ -104,11 +104,11 @@ const RULES_NAMES = [
 ];
 
 const GRID_EVENTS = [
-  { step: 0, obj: { gridRes: 128, seed: 1846359466, area: 20 } }, // GRID_EVENT
+  { step: 0, obj: { gridRes: 128, seed: 1846359466, area: 40 } }, // GRID_EVENT
 ];
 
 const RULE_EVENTS = [
-  { step: 0, obj: { ruleSet: 5 } },
+  { step: 0, obj: { ruleSet: 1 } },
 ];
 
 const TIME_EVENTS = [
@@ -438,7 +438,7 @@ function updateCamera()
   if(overviewCamera) {
     let speed = 0.00025;
     let center = vec3Scale([gridRes, gridRes, gridRes], 0.5);
-    let pos = [gridRes * Math.sin(currentTime * speed), 0.75 * gridRes * Math.sin(currentTime * speed), gridRes * Math.cos(currentTime * speed)];
+    let pos = [gridRes * Math.sin(currentTime * speed), 1.75 * gridRes * Math.sin(currentTime * speed), gridRes * Math.cos(currentTime * speed)];
     pos = vec3Add(center, pos);
     setView(pos, vec3Normalize(vec3Add(center, vec3Negate(pos))));
     return;
