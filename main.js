@@ -1,11 +1,11 @@
 const FULLSCREEN = false;
-const AUDIO = true;
+const AUDIO = false;
 
 const DISABLE_RENDERING = false;
 const AUDIO_RELOAD_INTERVAL = 0; // Reload interval in seconds, 0 = disabled
 
 const IDLE = false;
-const RECORDING = false;
+const RECORDING = true;
 const RECORDING_AT = -1; // Switch to recording mode at given step
 const SIMULATION_STEP_OFS = 0;
 const OVERVIEW_CAMERA = false;
@@ -82,8 +82,9 @@ const RULES = [
   96793530464266n, // spiky-10
   1821066142730n, // builder-10
   96793530462218n, // ripple-10
-  2216617588948994n, // stable-2
+  37688665960915591n, // shells
   30064771210n, // pulse-10
+  2216617588948994n, // stable-2
 ];
 
 const RULES_NAMES = [
@@ -95,16 +96,17 @@ const RULES_NAMES = [
   "spiky-10", // 5
   "builder-10", // 6
   "ripple-10", // 7
-  "stable-2", // 8
+  "shells-7", // 8
   "pulse-10", // 9
+  "stable-2"
 ];
 
 const GRID_EVENTS = [
-  { step: 0, obj: { gridRes: 128, seed: 1846359466, area: 22 } }, // GRID_EVENT
+  { step: 0, obj: { gridRes: 128, seed: 1846359466, area: 4 } }, // GRID_EVENT
 ];
 
 const RULE_EVENTS = [
-  { step: 0, obj: { ruleSet: 6 } },
+  { step: 0, obj: { ruleSet: 2 } },
 ];
 
 const TIME_EVENTS = [
@@ -267,7 +269,7 @@ async function playAudio()
  
   if(audioContext.state === "suspended")
     await audioContext.resume();
-  
+ 
   audioBufferSourceNode.start(0, currentTime / 1000.0);
 }
 
@@ -352,10 +354,10 @@ function render(time)
 
   currentTime = time - startTime;
 
+  const commandEncoder = device.createCommandEncoder();
+  
   if(!idle && !recording)
     updateSimulation();
-
-  const commandEncoder = device.createCommandEncoder();
  
   // TODO Distribute one simulation iteration across different frames (within updateDelay 'budget')
   if(!idle && currentTime - lastSimulationUpdateTime > updateDelay) {
@@ -381,11 +383,10 @@ function render(time)
     programmableValue
   ]));
 
-  setPerformanceTimer();
-
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
   encodeRenderPassAndSubmit(commandEncoder, renderPassDescriptor, renderPipeline, bindGroup[simulationIteration % 2]);
   
+  setPerformanceTimer();
   device.queue.submit([commandEncoder.finish()]);
 
   requestAnimationFrame(render);
