@@ -1,5 +1,5 @@
 const FULLSCREEN = false;
-const AUDIO = false;
+const AUDIO = true;
 
 const DISABLE_RENDERING = false;
 const AUDIO_RELOAD_INTERVAL = 0; // Reload interval in seconds, 0 = disabled
@@ -74,39 +74,41 @@ let activeCameraIndex = -1;
 let cameraReference;
 
 const RULES = [
-  2023103542460421n, // clouds-5
-  34359738629n, // 4/4-5
-  97240207056901n, // amoeba-5
-  962072678154n, // pyro-10
-  36507219973n, // framework-5
-  96793530464266n, // spiky-10
-  1821066142730n, // builder-10
-  96793530462218n, // ripple-10
-  37688665960915591n, // shells
-  30064771210n, // pulse-10
-  2216617588948994n, // stable-2
+  2023103542460421n, // clouds-5, key 0
+  34359738629n, // 4/4-5, key 1
+  97240207056901n, // amoeba-5, key 2
+  962072678154n, // pyro-10, key 3
+  36507219973n, // framework-5, key 4
+  96793530464266n, // spiky-10, key 5
+  1821066142730n, // builder-10, key 6
+  96793530462218n, // ripple-10, key 7
+  37688665960915591n, // shells-7, key 8
+  30064771210n, // pulse-10, key 9
+  4294970885n, // more-builds-5, key )
+  2216617588948994n, // stable-2, key =
 ];
 
 const RULES_NAMES = [
-  "clouds-5", // key '0'
-  "4/4-5", // key '1'
-  "amoeba-5", // key '2'
-  "pyro-10", // 3
-  "framework-5", // 4
-  "spiky-10", // 5
-  "builder-10", // 6
-  "ripple-10", // 7
-  "shells-7", // 8
-  "pulse-10", // 9
+  "clouds-5",
+  "4/4-5",
+  "amoeba-5",
+  "pyro-10",
+  "framework-5",
+  "spiky-10",
+  "builder-10",
+  "ripple-10",
+  "shells-7",
+  "pulse-10",
+  "more-builds-5",
   "stable-2"
 ];
 
 const GRID_EVENTS = [
-  { step: 0, obj: { gridRes: 128, seed: 1846359466, area: 4 } }, // GRID_EVENT
+  { step: 0, obj: { gridRes: 128, seed: 1846359466, area: 20 } }, // GRID_EVENT
 ];
 
 const RULE_EVENTS = [
-  { step: 0, obj: { ruleSet: 2 } },
+  { step: 0, obj: { ruleSet: 5 } },
 ];
 
 const TIME_EVENTS = [
@@ -659,9 +661,21 @@ function handleCameraControlEvent(e)
 
 async function handleKeyEvent(e)
 {    
+  // Rules 0-9
   if(e.key !== " " && !isNaN(e.key))
   {
     setRules({ ruleSet: parseInt(e.key, 10) });
+    return;
+  }
+
+  // Rules 10+ via shift
+  if(e.key === ")") {
+    setRules({ ruleSet: 10 });
+    return;
+  }
+
+  if(e.key === "=") {
+    setRules({ ruleSet: 11 });
     return;
   }
 
