@@ -25,6 +25,7 @@ struct RuleSet
 struct Hit
 {
   index: i32,
+  pos: vec3f,
   norm: vec3f,
   state: u32,
   dist: f32,
@@ -166,12 +167,6 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, hit: ptr<function, Hit>) -
   }
 }
 
-// iq/rgba
-fn palette(t: f32, a: vec3f, b: vec3f, c: vec3f, d: vec3f) -> vec3f
-{
-  return a + b * cos(TWO_PI * (c * t + d + uniforms.simulationStep * 0.001));
-}
-
 fn calcOcclusion(pos: vec3f, index: i32, norm: vec3i) -> f32
 {
   // TODO Set out of grid cells to state 0?
@@ -214,19 +209,9 @@ fn shade(pos: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> vec3f
 
   let val = f32(rules.states) / f32(min((*hit).state, rules.states));
   let sky = 0.4 + (*hit).norm.y * 0.6;
-
-  // Position in cube and z-distance with sky and state
   let col = vec3f(0.005) + pos / f32(grid.mul.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
-
-  /*
-  // Distance from center into palette scaled by state and dist
-  let halfGrid = f32(grid.mul.y) * 0.5;
-  let v = pos - vec3f(halfGrid);
-  let centerDist = length(v) / halfGrid;
-  let col = palette(centerDist, vec3f(0.1), vec3f(0.2), vec3f(0.3), vec3f(0.1, 0.3, 0.6)) * val * val * 0.3 * exp(-3 * (*hit).dist / (*hit).maxDist);
-  */
-
   let occ = calcOcclusion(pos, (*hit).index, vec3i((*hit).norm));
+
   return col * occ * occ * occ;
 }
 
@@ -260,14 +245,19 @@ fn trace(ori: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> bool
   let invDir = 1.0 / dir;
   var tmin: f32;
   var tmax: f32;
+
   if(intersectAabb(vec3f(0), vec3f(f32(grid.mul.y)), ori, invDir, &tmin, &tmax)) {
     tmin = max(tmin - EPSILON, 0.0);
     (*hit).maxDist = tmax - EPSILON - tmin;
     if(traverseGrid(ori + tmin * dir, invDir, (*hit).maxDist, hit)) {
-      (*hit).col = shade(ori + (tmin + (*hit).dist) * dir, dir, hit);
+      (*hit).pos = ori + (tmin + (*hit).dist) * dir;
+      (*hit).col = shade((*hit).pos, dir, hit);
       return true;
     }
   }
+
+  (*hit).col = background(ori, dir);
+
   return false;
 }
 
@@ -275,26 +265,40 @@ fn trace(ori: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> bool
 fn fragmentMain(@builtin(position) position: vec4f) -> @location(0) vec4f
 {
   // Framebuffer y-down in webgpu
-  let ori = uniforms.eye;
   let dirEyeSpace = normalize(vec3f((position.xy - vec2f(WIDTH, HEIGHT) * 0.5) / f32(HEIGHT), uniforms.tanHalfFov));
-  let dir = uniforms.right * dirEyeSpace.x - uniforms.up * dirEyeSpace.y + uniforms.forward * dirEyeSpace.z;
+  var dir = uniforms.right * dirEyeSpace.x - uniforms.up * dirEyeSpace.y + uniforms.forward * dirEyeSpace.z;
+  var ori = uniforms.eye;
 
-  var col = background(ori, dir);
+  var col = vec3f(0.0);
   var hit: Hit;
-
-  if(trace(ori, dir, &hit)) {
-    col = hit.col;
-  } else {
+ 
+  // Normal cell grid with ground reflection
+  if(!trace(ori, dir, &hit)) {
     var t: f32;
     if(intersectGround(-30.0, ori, dir, &t)) {
       let newDir = reflect(dir, vec3f(0.0, 1.0, 0.0));
       var newOri = ori + t * dir;
       newOri += newDir * vec3f(5.0 * sin(newOri.x + uniforms.time * 0.0015), 0.0, 1.5 * sin(newOri.y + uniforms.time * 0.003));
-      if(trace(newOri, newDir, &hit)) {
-        col = mix(col, hit.col, 0.3) * 0.75;
-      }
+      trace(newOri, newDir, &hit);
     }
   }
+  col = hit.col;
+
+  /*
+  // All cells reflecting
+  var iter = 1.0;
+  loop {
+    let cellHit = trace(ori, dir, &hit);
+    col += hit.col;
+    if(!cellHit || iter > 2.0) {
+      break;
+    } 
+    dir = reflect(dir, hit.norm);
+    ori = hit.pos + EPSILON * dir;
+    iter += 1.0;
+  }
+  col /= iter;
+  */ 
 
   // Amplify
   //col += pow(max(col - vec3f(0.3), vec3f(0.0)), vec3f(1.5)) * 0.5;
