@@ -226,7 +226,7 @@ async function createAudioResources()
 
 async function renderAudio()
 {
-  let shaderCode = await loadTextFile("audio.wgsl");
+  let shaderCode = await loadTextFile("audio2.wgsl");
   let shaderModule = device.createShaderModule({code: shaderCode});
   let pipeline = await createComputePipeline(shaderModule, audioPipelineLayout, "audioMain");
 

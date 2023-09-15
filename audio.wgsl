@@ -76,13 +76,14 @@ const A3 = 37;
 const G3 = 35;
 const F3 = 33;
 const A2 = 25;
+const DIS1 = 27;
+const D1 = 26;
 const F1 = 9;
-const D1 = 6;
 
 // convert a note to it's frequency representation
-fn noteToFreq(note: u32) -> f32
+fn noteToFreq(note: f32) -> f32
 {
-  return (440.0 / 32.0) * pow(2.0, (f32(note) - 9.0) / 12.0);
+  return 440.0 * pow(2.0, (f32(note) - 69.0) / 12.0);
 }
 
 fn pling(time: f32, freq : f32) -> f32
@@ -100,16 +101,16 @@ fn modulo_euclidean(a: f32, b: f32) -> f32
 
 // this should be rewritten into something more generalized
 const kickPatternLength = 16;
-const kickPattern = array<u32, kickPatternLength>
-(D1,0,0,0, D1,0,D1,0, 0,0,D1,0, D1,0,0,D1);
+const kickPattern = array<f32, kickPatternLength>
+(DIS1,-1,-1,-1, DIS1,-1,DIS1,-1, -1,-1,DIS1,-1, DIS1,-1,-1,DIS1);
 
 const hihatPatternLength = 16;
-const hihatPattern = array<u32, hihatPatternLength>
-(0,0,D1,0, 0,0,D1,0, 0,0,D1,0, 0,0,D1,D1);
+const hihatPattern = array<f32, hihatPatternLength>
+(-1,-1,D1,-1, -1,-1,D1,-1, -1,-1,D1,-1, -1,-1,D1,D1);
 
 const bassPatternLength = 16;
-const bassPattern = array<u32, bassPatternLength>
-(0,0,F3,0, 0,0,F3,0, 0,F3,0,0, F3,G3,A3,B3);
+const bassPattern = array<f32, bassPatternLength>
+(-1,-1,F3,-1, -1,-1,F3,-1, -1,F3,-1,-1, F3,G3,A3,B3);
 
 @group(0) @binding(0) var<uniform> params: AudioParameters;
 @group(0) @binding(1) var<storage, read_write> buffer: array<vec2f>;
@@ -133,11 +134,11 @@ fn audioMain(@builtin(global_invocation_id) globalId: vec3u)
   // FIXME: generalize pattern stuff
   for(var i=0;i<kickPatternLength;i++)
   {
-    let note = kickPattern[i];
-    let noteFreq = noteToFreq(note);
     let beatTime = f32(i) * TIME_PER_BEAT;
     let noteTime = modulo_euclidean(time - beatTime, TIME_PER_PATTERN);
-    let noteOn = sign(f32(note));
+
+    let noteFreq = noteToFreq(kickPattern[i]);
+    let noteOn = sign(kickPattern[i]+1.0);
 
     result += vec2f(0.5 * kick(noteTime, noteFreq) * noteOn);
   }
@@ -146,11 +147,11 @@ fn audioMain(@builtin(global_invocation_id) globalId: vec3u)
   // FIXME: generalize pattern stuff
   for(var i=0;i<hihatPatternLength;i++)
   {
-    let note = hihatPattern[i];
-    let noteFreq = noteToFreq(note);
     let beatTime = f32(i) * TIME_PER_BEAT;
     let noteTime = modulo_euclidean(time - beatTime, TIME_PER_PATTERN);
-    let noteOn = sign(f32(note));
+
+    let noteFreq = noteToFreq(hihatPattern[i]);
+    let noteOn = sign(hihatPattern[i]+1.0);
 
     // FIXME: hihat doesn't really have a frequency right now
     result += vec2f(0.15 * hihat(noteTime, noteFreq) * noteOn);
@@ -160,11 +161,11 @@ fn audioMain(@builtin(global_invocation_id) globalId: vec3u)
   // FIXME: generalize pattern stuff
   for(var i=0;i<bassPatternLength;i++)
   {
-    let note = bassPattern[i];
-    let noteFreq = noteToFreq(note);
     let beatTime = f32(i) * TIME_PER_BEAT;
     let noteTime = modulo_euclidean(time - beatTime, TIME_PER_PATTERN);
-    let noteOn = sign(f32(note));
+
+    let noteFreq = noteToFreq(bassPattern[i]);
+    let noteOn = sign(bassPattern[i]+1.0);
 
     result += vec2f(0.25 * bass(noteTime, noteFreq) * noteOn);
   }
