@@ -119,16 +119,10 @@ fn maxComp(v: vec3f) -> f32
   return max(v.x, max(v.y, v.z));
 }
 
-fn intersectPlane(p: vec3f, norm: vec3f, ori: vec3f, dir: vec3f, t: ptr<function, f32>) -> bool
+fn intersectGround(d: f32, ori: vec3f, dir: vec3f, t: ptr<function, f32>) -> bool
 {
-  let denominator = dot(norm, dir);
-  if(abs(denominator) > EPSILON) {
-    *t = dot((p - ori), norm) / denominator;
-    if(*t > EPSILON) {
-      return true;
-    }
-  }
-  return false;
+  *t = step(EPSILON, abs(dir.y)) * ((d - ori.y) / dir.y);
+  return bool(step(EPSILON, *t));
 }
 
 fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, invDir: vec3f, tmin: ptr<function, f32>, tmax: ptr<function, f32>) -> bool
@@ -292,9 +286,8 @@ fn fragmentMain(@builtin(position) position: vec4f) -> @location(0) vec4f
     col = hit.col;
   } else {
     var t: f32;
-    let norm = vec3f(0.0, 1.0, 0.0);
-    if(intersectPlane(vec3f(0.0, -30.0, 0.0), norm, ori, dir, &t)) {
-      let newDir = reflect(dir, norm);
+    if(intersectGround(-30.0, ori, dir, &t)) {
+      let newDir = reflect(dir, vec3f(0.0, 1.0, 0.0));
       var newOri = ori + t * dir;
       newOri += newDir * vec3f(5.0 * sin(newOri.x + uniforms.time * 0.0015), 0.0, 1.5 * sin(newOri.y + uniforms.time * 0.003));
       if(trace(newOri, newDir, &hit)) {
