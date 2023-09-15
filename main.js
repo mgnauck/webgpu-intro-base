@@ -1,8 +1,9 @@
 const FULLSCREEN = false;
-const AUDIO = false;
+const AUDIO = true;
 
 const DISABLE_RENDERING = false;
 const AUDIO_RELOAD_INTERVAL = 0; // Reload interval in seconds, 0 = disabled
+const AUDIO_SHADER_FILE = "audio.wgsl";
 
 const IDLE = false;
 const RECORDING = true;
@@ -226,7 +227,7 @@ async function createAudioResources()
 
 async function renderAudio()
 {
-  let shaderCode = await loadTextFile("audio2.wgsl");
+  let shaderCode = await loadTextFile(AUDIO_SHADER_FILE);
   let shaderModule = device.createShaderModule({code: shaderCode});
   let pipeline = await createComputePipeline(shaderModule, audioPipelineLayout, "audioMain");
 
