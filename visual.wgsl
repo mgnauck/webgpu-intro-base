@@ -240,7 +240,7 @@ fn background(ori: vec3f, dir: vec3f) -> vec3f
 {
   // TODO Make much better background
   let a = 0.5 + abs(dir.y) * 0.5;
-  return vec3f(0.3, 0.3, 0.6) * a * 0.015; 
+  return 0.05 * vec3f(0.3, 0.3, 0.4) * vec3f(pow(a, 42.0)); 
 }
 
 // https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
@@ -294,11 +294,11 @@ fn fragmentMain(@builtin(position) position: vec4f) -> @location(0) vec4f
     var t: f32;
     let norm = vec3f(0.0, 1.0, 0.0);
     if(intersectPlane(vec3f(0.0, -30.0, 0.0), norm, ori, dir, &t)) {
-      let newDir = normalize(reflect(dir, norm));
+      let newDir = reflect(dir, norm);
       var newOri = ori + t * dir;
-      newOri += newDir * vec3f(4.3 * sin(newOri.x + uniforms.time * 0.0015), 0.0, 1.2 * cos(newOri.y + uniforms.time * 0.002));
+      newOri += newDir * vec3f(5.0 * sin(newOri.x + uniforms.time * 0.0015), 0.0, 1.5 * sin(newOri.y + uniforms.time * 0.003));
       if(trace(newOri, newDir, &hit)) {
-        col += hit.col * vec3f(0.3);
+        col = mix(col, hit.col, 0.3) * 0.75;
       }
     }
   }

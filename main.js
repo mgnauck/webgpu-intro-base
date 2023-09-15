@@ -5,10 +5,10 @@ const DISABLE_RENDERING = false;
 const AUDIO_RELOAD_INTERVAL = 0; // Reload interval in seconds, 0 = disabled
 
 const IDLE = false;
-const RECORDING = false;
+const RECORDING = true;
 const RECORDING_AT = -1; // Switch to recording mode at given step
 const SIMULATION_STEP_OFS = 0;
-const OVERVIEW_CAMERA = true;
+const OVERVIEW_CAMERA = false;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 1024;
