@@ -79,6 +79,7 @@ const A2 = 25;
 const DIS1 = 27;
 const D1 = 26;
 const F1 = 9;
+const NONE = -1;
 
 // convert a note to it's frequency representation
 fn noteToFreq(note: f32) -> f32
@@ -99,18 +100,33 @@ fn modulo_euclidean(a: f32, b: f32) -> f32
   return select(m, m + abs(b), m < 0.0);
 }
 
-// this should be rewritten into something more generalized
-const kickPatternLength = 16;
-const kickPattern = array<f32, kickPatternLength>
-(DIS1,-1,-1,-1, DIS1,-1,DIS1,-1, -1,-1,DIS1,-1, DIS1,-1,-1,DIS1);
+const KICK_CHANNEL = 0;
+const HIHAT_CHANNEL = 1;
+const BASS_CHANNEL = 2;
+const CHANNELS = 4;
+const ROWS = 16;
+const PATTERN = array<array<f32,CHANNELS>, ROWS>
+( 
+  array<f32,CHANNELS>( DIS1, NONE, NONE, NONE ), 
+  array<f32,CHANNELS>( NONE, NONE,   G3, NONE ), 
+  array<f32,CHANNELS>( NONE,   D4, NONE, NONE ), 
+  array<f32,CHANNELS>( NONE, NONE, NONE, NONE ), 
 
-const hihatPatternLength = 16;
-const hihatPattern = array<f32, hihatPatternLength>
-(-1,-1,D1,-1, -1,-1,D1,-1, -1,-1,D1,-1, -1,-1,D1,D1);
+  array<f32,CHANNELS>( DIS1, NONE, NONE, NONE ), 
+  array<f32,CHANNELS>( NONE, NONE, NONE, NONE ), 
+  array<f32,CHANNELS>( NONE,   D4, NONE, NONE ), 
+  array<f32,CHANNELS>( NONE, NONE, NONE, NONE ), 
 
-const bassPatternLength = 16;
-const bassPattern = array<f32, bassPatternLength>
-(-1,-1,F3,-1, -1,-1,F3,-1, -1,F3,-1,-1, F3,G3,A3,B3);
+  array<f32,CHANNELS>( DIS1, NONE, NONE, NONE ), 
+  array<f32,CHANNELS>( NONE, NONE, NONE, NONE ), 
+  array<f32,CHANNELS>( NONE,   D4, NONE, NONE ), 
+  array<f32,CHANNELS>( NONE, NONE, NONE, NONE ), 
+
+  array<f32,CHANNELS>( DIS1, NONE, NONE, NONE ), 
+  array<f32,CHANNELS>( NONE, NONE, NONE, NONE ), 
+  array<f32,CHANNELS>( NONE,   D4, NONE, NONE ), 
+  array<f32,CHANNELS>( DIS1,   D4, NONE, NONE ), 
+);
 
 @group(0) @binding(0) var<uniform> params: AudioParameters;
 @group(0) @binding(1) var<storage, read_write> buffer: array<vec2f>;
@@ -128,48 +144,36 @@ fn audioMain(@builtin(global_invocation_id) globalId: vec3u)
   let time = f32(sample) / f32(params.sampleRate);
 
   // Samples are calculated in mono and then written to left/right
-  var result = vec2(0.0);
+  var output = vec2(0.0);
 
-  // kick
-  // FIXME: generalize pattern stuff
-  for(var i=0;i<kickPatternLength;i++)
+  for(var i=0;i<ROWS;i++)
   {
     let beatTime = f32(i) * TIME_PER_BEAT;
     let noteTime = modulo_euclidean(time - beatTime, TIME_PER_PATTERN);
 
-    let noteFreq = noteToFreq(kickPattern[i]);
-    let noteOn = sign(kickPattern[i]+1.0);
+    // kick
+    let kickNote = PATTERN[i][KICK_CHANNEL];
+    let kickNoteFreq = noteToFreq(kickNote);
+    let kickNoteOn = sign(kickNote+1.0);
 
-    result += vec2f(0.5 * kick(noteTime, noteFreq) * noteOn);
-  }
+    output += vec2f(0.25 * kick(noteTime, kickNoteFreq) * kickNoteOn);
 
-  // hihat
-  // FIXME: generalize pattern stuff
-  for(var i=0;i<hihatPatternLength;i++)
-  {
-    let beatTime = f32(i) * TIME_PER_BEAT;
-    let noteTime = modulo_euclidean(time - beatTime, TIME_PER_PATTERN);
+    // hihat
+    let hihatNote = PATTERN[i][HIHAT_CHANNEL];
+    let hihatNoteFreq = noteToFreq(hihatNote);
+    let hihatNoteOn = sign(hihatNote+1.0);
 
-    let noteFreq = noteToFreq(hihatPattern[i]);
-    let noteOn = sign(hihatPattern[i]+1.0);
+    output += vec2f(0.25 * hihat(noteTime, hihatNoteFreq) * hihatNoteOn);
 
-    // FIXME: hihat doesn't really have a frequency right now
-    result += vec2f(0.15 * hihat(noteTime, noteFreq) * noteOn);
-  }
+    // bass
+    let bassNote = PATTERN[i][BASS_CHANNEL];
+    let bassNoteFreq = noteToFreq(bassNote);
+    let bassNoteOn = sign(bassNote+1.0);
 
-  // bass
-  // FIXME: generalize pattern stuff
-  for(var i=0;i<bassPatternLength;i++)
-  {
-    let beatTime = f32(i) * TIME_PER_BEAT;
-    let noteTime = modulo_euclidean(time - beatTime, TIME_PER_PATTERN);
-
-    let noteFreq = noteToFreq(bassPattern[i]);
-    let noteOn = sign(bassPattern[i]+1.0);
-
-    result += vec2f(0.25 * bass(noteTime, noteFreq) * noteOn);
+    // this line kills it w/o error message :(
+    // output += vec2f(0.25 * bass(noteTime, bassNoteFreq) * bassNoteOn);
   }
 
   // Write 2 floats between -1 and 1 to output buffer (stereo)
-  buffer[sample] = clamp(result, vec2f(-1), vec2f(1));
+  buffer[sample] = clamp(output, vec2f(-1), vec2f(1));
 }
