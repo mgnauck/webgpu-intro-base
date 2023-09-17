@@ -155,16 +155,17 @@ fn audioMain(@builtin(global_invocation_id) globalId: vec3u)
   // Samples are calculated in mono and then written to left/right
   var output = vec2(0.0);
 
-  for(var i=0;i<ROWS;i++)
+  for(var i=0; i<ROWS; i++)
   {
     let beatTime = f32(i) * TIME_PER_BEAT;
     let noteTime = modulo_euclidean(time - beatTime, TIME_PER_PATTERN);
+    let currentRow = PATTERN[i];
 
     // kick
-    let kickNote = PATTERN[i][KICK_CHANNEL];
-    let kickNoteNext = PATTERN[(i+1)%ROWS][KICK_CHANNEL];
+    let kickNote = currentRow[KICK_CHANNEL];
+    //let kickNoteNext = PATTERN[(i+1)%ROWS][KICK_CHANNEL];
     let kickNoteFreq = noteToFreq(kickNote);
-    let kickNoteOn = 1.0 * sign(kickNote+1.0);
+    let kickNoteOn = 1.0 * sign(kickNote + 1.0);
 
     if(time > TIME_PER_PATTERN * 1)
     {
@@ -172,15 +173,15 @@ fn audioMain(@builtin(global_invocation_id) globalId: vec3u)
     }
 
     // hihat
-    let hihatNote = PATTERN[i][HIHAT_CHANNEL];
+    let hihatNote = currentRow[HIHAT_CHANNEL];
     let hihatNoteFreq = noteToFreq(hihatNote);
-    let hihatNoteOn = sign(hihatNote+1.0);
+    let hihatNoteOn = sign(hihatNote + 1.0);
     output += vec2f(0.05 * hihat(noteTime, hihatNoteFreq) * hihatNoteOn);
 
     // bass
-    let bassNote = PATTERN[i][BASS_CHANNEL];
+    let bassNote = currentRow[BASS_CHANNEL];
     let bassNoteFreq = noteToFreq(bassNote);
-    let bassNoteOn = sign(bassNote+1.0);
+    let bassNoteOn = sign(bassNote + 1.0);
     output += vec2f(0.4 * bass(noteTime, bassNoteFreq) * bassNoteOn);
 
     // clap

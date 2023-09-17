@@ -1,7 +1,7 @@
 const FULLSCREEN = false;
 const AUDIO = true;
 
-const DISABLE_RENDERING = true;
+const DISABLE_RENDERING = false;
 const AUDIO_RELOAD_INTERVAL = 0; // Reload interval in seconds, 0 = disabled
 const AUDIO_SHADER_FILE = "audio.wgsl";
 
@@ -85,6 +85,7 @@ const RULES = [
   96793530462218n, // ripple-10, key 7
   37688665960915591n, // shells-7, key 8
   30064771210n, // pulse-10, key 9
+  962072681477n, // 678-5, key (
   4294970885n, // more-builds-5, key )
   2216617588948994n, // stable-2, key =
 ];
@@ -100,8 +101,9 @@ const RULES_NAMES = [
   "ripple-10",
   "shells-7",
   "pulse-10",
+  "678-5",
   "more-builds-5",
-  "stable-2"
+  "stable-2",
 ];
 
 const GRID_EVENTS = [
@@ -109,7 +111,7 @@ const GRID_EVENTS = [
 ];
 
 const RULE_EVENTS = [
-  { step: 0, obj: { ruleSet: 1 } },
+  { step: 0, obj: { ruleSet: 2 } },
 ];
 
 const TIME_EVENTS = [
@@ -231,6 +233,10 @@ async function renderAudio()
 
   let shaderCode = await loadTextFile(AUDIO_SHADER_FILE);
   let shaderModule = device.createShaderModule({code: shaderCode});
+
+  const shaderInfo = await shaderModule.getCompilationInfo();
+  shaderInfo.messages.forEach((m) => console.log(`${m.type} (${m.lineNum}): ${m.message}`)); 
+
   let pipeline = await createComputePipeline(shaderModule, audioPipelineLayout, "audioMain");
 
   let commandEncoder = device.createCommandEncoder();
@@ -677,13 +683,18 @@ async function handleKeyEvent(e)
   }
 
   // Rules 10+ via shift
-  if(e.key === ")") {
+  if(e.key === "(") {
     setRules({ ruleSet: 10 });
     return;
   }
 
-  if(e.key === "=") {
+  if(e.key === ")") {
     setRules({ ruleSet: 11 });
+    return;
+  }
+
+  if(e.key === "=") {
+    setRules({ ruleSet: 12 });
     return;
   }
 
@@ -867,9 +878,27 @@ async function main()
   if(!gpuAdapter)
     throw new Error("Can not use WebGPU. No GPU adapter available.");
 
+  console.log("GPU adapter features:");
+  const gpuAdapterFeatures = gpuAdapter.features;
+  gpuAdapterFeatures.forEach((value) => console.log(value));
+  console.log("---");
+
+  console.log("GPU adapter limits:");
+  console.log(gpuAdapter.limits);
+  console.log("---");
+
   device = await gpuAdapter.requestDevice();
   if(!device)
     throw new Error("Failed to request logical device.");
+
+  device.lost.then((info) => {
+    console.error(`WebGPU device was lost: ${info.message}`);
+    device = null;
+    if (info.reason !== "destroyed") { // Only reason as per spec is 'destroyed' at the moment
+      // Re-initialize
+      //main();
+    }
+  });
 
   if(AUDIO) {
     await createAudioResources();
