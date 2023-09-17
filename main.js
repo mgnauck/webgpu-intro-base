@@ -2,7 +2,7 @@ const FULLSCREEN = false;
 const AUDIO = true;
 
 const DISABLE_RENDERING = true;
-const AUDIO_RELOAD_INTERVAL = 3000; // Reload interval in seconds, 0 = disabled
+const AUDIO_RELOAD_INTERVAL = 0; // Reload interval in seconds, 0 = disabled
 const AUDIO_SHADER_FILE = "audio.wgsl";
 
 const IDLE = false;
