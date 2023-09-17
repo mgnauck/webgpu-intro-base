@@ -1,8 +1,8 @@
 const FULLSCREEN = false;
 const AUDIO = true;
 
-const DISABLE_RENDERING = false;
-const AUDIO_RELOAD_INTERVAL = 0; // Reload interval in seconds, 0 = disabled
+const DISABLE_RENDERING = true;
+const AUDIO_RELOAD_INTERVAL = 3000; // Reload interval in seconds, 0 = disabled
 const AUDIO_SHADER_FILE = "audio.wgsl";
 
 const IDLE = false;
@@ -227,6 +227,8 @@ async function createAudioResources()
 
 async function renderAudio()
 {
+  const renderStartTime = performance.now();
+
   let shaderCode = await loadTextFile(AUDIO_SHADER_FILE);
   let shaderModule = device.createShaderModule({code: shaderCode});
   let pipeline = await createComputePipeline(shaderModule, audioPipelineLayout, "audioMain");
@@ -253,7 +255,9 @@ async function renderAudio()
 
   audioReadBuffer.unmap();
 
-  console.log("Rendered audio");
+  const renderDuration = performance.now() - renderStartTime;
+
+  console.log("Rendered audio, duration: " + renderDuration.toFixed(2) + " ms");
 }
 
 async function suspendAudio()
@@ -287,6 +291,9 @@ async function reloadAudio()
     await playAudio();
 
   console.log("Audio shader reloaded/re-rendered audio");
+
+  if(AUDIO_RELOAD_INTERVAL > 0)
+    setTimeout(reloadAudio, AUDIO_RELOAD_INTERVAL);
 }
 
 async function createRenderResources()
@@ -844,7 +851,7 @@ async function startRender()
     await playAudio();
 
     if(AUDIO_RELOAD_INTERVAL > 0)
-      setInterval(reloadAudio, AUDIO_RELOAD_INTERVAL);
+      setTimeout(reloadAudio, AUDIO_RELOAD_INTERVAL);
   }
 
   if(!DISABLE_RENDERING)
