@@ -1,15 +1,13 @@
 const FULLSCREEN = false;
 const AUDIO = true;
+const BPM = 120;
 
 const DISABLE_RENDERING = false;
 const AUDIO_RELOAD_INTERVAL = 0; // Reload interval in seconds, 0 = disabled
 const AUDIO_SHADER_FILE = "audio.wgsl";
 
 const IDLE = false;
-const RECORDING = true;
-const RECORDING_AT = -1; // Switch to recording mode at given step
-const SIMULATION_STEP_OFS = 0;
-const OVERVIEW_CAMERA = false;
+const RECORDING = false;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 1024;
@@ -19,8 +17,9 @@ const FOV = 50.0;
 const AUDIO_BUFFER_SIZE = 4096 * 4096;
 
 const MAX_GRID_RES = 128;
-const DEFAULT_UPDATE_DELAY = 250;
-const GLOBAL_CAM_SPEED = 50;
+const SIMULATION_UPDATE_STEPS = 4;
+const DEFAULT_UPDATE_DELAY = 1;
+const GLOBAL_CAM_SPEED = 5;
 const DEFAULT_CAM_SPEED = 1;
 
 const MOVE_VELOCITY = 0.75;
@@ -29,7 +28,6 @@ const WHEEL_VELOCITY = 0.005;
 
 let idle = IDLE;
 let recording = RECORDING;
-let overviewCamera = OVERVIEW_CAMERA;
 
 let audioContext;
 let webAudioBuffer;
@@ -63,14 +61,13 @@ let grid;
 let rules;
 
 let startTime;
-let startIdleTime = 0;
 let currentTime = 0;
 let lastSimulationUpdateTime = 0;
-let simulationStep = 0;
-let activeSimulationStep = -1;
 let simulationIterationPaused = false;
 let simulationIteration = 0;
-let activeCameraIndex = -1;
+let gridBufferUpdateOffset = 0;
+let activeSimulationEventIndex = -1;
+let activeCameraEventIndex = -1;
 
 let cameraReference;
 
@@ -106,24 +103,16 @@ const RULES_NAMES = [
   "stable-2",
 ];
 
-const GRID_EVENTS = [
-  { step: 0, obj: { gridRes: 128, seed: 1846359466, area: 40 } }, // GRID_EVENT
-];
-
-const RULE_EVENTS = [
-  { step: 0, obj: { ruleSet: 2 } },
-];
-
-const TIME_EVENTS = [
-  //{ step: 25, obj: { delta: 0 } }, // TIME_EVENT (paused: true, updateDelay: 250)
+const SIMULATION_EVENTS = [
+  { time: 0, obj: { ruleSet: 2, gridRes: 128, seed: 1846359466, area: 40 } },
+  { time: 20, obj: { delta: 0 } },
 ];
 
 const CAMERA_EVENTS = [
   { time: 0, obj: { eye: [133.37, 134.02, 133.47], dirPhi: -2.2577, dirTheta: 2.1886 } }, // CAMERA_EVENT
-  { time: 6250, obj: { eye: [-21.47, 118.41, -7.01], dirPhi: -0.5561, dirTheta: 1.0594, moveEyePhi: -0.6081, moveEyeTheta: 0.9807 } }, // CAMERA_EVENT
-  { time: 10000, obj: { eye: [82.75, 90.20, 93.00], dirPhi: 2.5172, dirTheta: 2.4197, moveEyePhi: -1.0383, moveEyeTheta: 1.1033 } }, // CAMERA_EVENT
-  { time: 15000, obj: { eye: [122.11, 27.74, 129.76], dirPhi: 2.6738, dirTheta: 2.3647, moveEyePhi: 0.0000, moveEyeTheta: 3.0183 } }, // CAMERA_EVENT
-  { time: 20000, obj: { eye: [133.37, 134.02, 133.47], dirPhi: -2.2577, dirTheta: 2.1886 } }, // CAMERA_EVENT
+  { time: 6.25, obj: { eye: [-21.47, 118.41, -7.01], dirPhi: -0.5561, dirTheta: 1.0594, moveEyePhi: -0.6081, moveEyeTheta: 0.9807 } }, // CAMERA_EVENT
+  { time: 15, obj: { eye: [122.11, 27.74, 129.76], dirPhi: 2.6738, dirTheta: 2.3647, moveEyePhi: 0.0000, moveEyeTheta: 3.0183 } }, // CAMERA_EVENT
+  { time: 20, obj: { eye: [133.37, 134.02, 133.47], dirPhi: -2.2577, dirTheta: 2.1886 } }, // CAMERA_EVENT
 ];
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
@@ -360,33 +349,51 @@ async function createPipelines()
   renderPipeline = await createRenderPipeline(shaderModule, pipelineLayout, "vertexMain", "fragmentMain");
 }
 
-function render(time)
-{
-  if(AUDIO)
-    time = audioContext.currentTime * 1000;
+let last;
 
-  if(startTime === undefined)
+function render(time)
+{  
+  //setPerformanceTimer();
+  if(last !== undefined) {
+    let frameTime = (performance.now() - last);
+    document.title = `${(frameTime).toFixed(2)} / ${(1000.0 / frameTime).toFixed(2)}`;
+  }
+  last = performance.now();
+
+  time = (AUDIO ? audioContext.currentTime : time) * BPM / 60; // time in beats
+
+  if(startTime === undefined) {
     startTime = time;
+    console.log("Set startTime: " + startTime);
+  }
 
   currentTime = time - startTime;
 
   const commandEncoder = device.createCommandEncoder();
   
-  if(!idle && !recording)
+  if(!idle && !recording) {
     updateSimulation();
+    updateCamera();
+  }
  
-  // TODO Distribute one simulation iteration across different frames (within updateDelay 'budget')
-  if(!idle && currentTime - lastSimulationUpdateTime > updateDelay) {
-    if(!simulationIterationPaused) {
-      const count = Math.ceil(gridRes / 4);
-      encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], count, count, count); 
-      simulationIteration++;
-    }
-    lastSimulationUpdateTime += updateDelay;
-    simulationStep++;
+  if(!idle && !simulationIterationPaused && gridBufferUpdateOffset < gridRes) {
+    const count = Math.ceil(gridRes / 4);
+    device.queue.writeBuffer(gridBuffer[simulationIteration % 2], 12, new Uint32Array([gridBufferUpdateOffset]));
+    encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], count, count, count / SIMULATION_UPDATE_STEPS); 
+    gridBufferUpdateOffset += count / SIMULATION_UPDATE_STEPS * 4;
   }
 
-  updateCamera();
+  if(!idle && currentTime - lastSimulationUpdateTime > updateDelay) {
+    if(gridBufferUpdateOffset >= gridRes) {
+      if(!simulationIterationPaused)
+        simulationIteration++;
+      gridBufferUpdateOffset = 0;
+      lastSimulationUpdateTime = currentTime;
+    } else {
+      if(!simulationIterationPaused)
+        console.log("Simulation update not finished within time budget.");
+    }
+  }
 
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
     ...right,
@@ -394,15 +401,14 @@ function render(time)
     ...up,
     currentTime,
     ...dir,
-    simulationStep,
+    1.0, // free value 1
     ...eye,
-    programmableValue
+    1.0 // free value 2
   ]));
 
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
   encodeRenderPassAndSubmit(commandEncoder, renderPassDescriptor, renderPipeline, bindGroup[simulationIteration % 2]);
   
-  setPerformanceTimer();
   device.queue.submit([commandEncoder.finish()]);
 
   requestAnimationFrame(render);
@@ -423,66 +429,41 @@ function setPerformanceTimer(timerName)
 
 function updateSimulation()
 {
-  if(simulationStep == RECORDING_AT) {
-    idle = true;
-    recording = true;
-    return;
+  if(activeSimulationEventIndex + 1 < SIMULATION_EVENTS.length && currentTime >= SIMULATION_EVENTS[activeSimulationEventIndex + 1].time) {
+    let eventObj = SIMULATION_EVENTS[++activeSimulationEventIndex].obj;
+    setGrid(eventObj);
+    setRules(eventObj);
+    setTime(eventObj);
   }
-
-  if(simulationStep > activeSimulationStep) {
-    handleUpdateEvents(GRID_EVENTS, setGrid);
-    handleUpdateEvents(RULE_EVENTS, setRules);
-    handleUpdateEvents(TIME_EVENTS, setTime);
-    activeSimulationStep = simulationStep;
-  }
-}
-
-function handleUpdateEvents(events, updateFunction)
-{
-  events.forEach(e => {
-    if(e.step == simulationStep) {
-      updateFunction(e.obj);
-      return;
-    }
-  });
 }
 
 function updateCamera()
 {
-  if(overviewCamera) {
-    let speed = 0.00025;
-    let center = vec3Scale([gridRes, gridRes, gridRes], 0.5);
-    let pos = [gridRes * Math.sin(currentTime * speed), 1.75 * gridRes * Math.sin(currentTime * speed), gridRes * Math.cos(currentTime * speed)];
-    pos = vec3Add(center, pos);
-    setView(pos, vec3Normalize(vec3Add(center, vec3Negate(pos))));
-    return;
-  }
+  if(activeCameraEventIndex + 1 < CAMERA_EVENTS.length && currentTime >= CAMERA_EVENTS[activeCameraEventIndex + 1].time)
+    recordCameraEvent(CAMERA_EVENTS[++activeCameraEventIndex].obj);
 
-  if(!idle && !recording) {
-    if(activeCameraIndex + 1 < CAMERA_EVENTS.length && currentTime >= CAMERA_EVENTS[activeCameraIndex + 1].time) {
-      activeCameraIndex++;
-      console.log(`Camera change at ${currentTime.toFixed(2)}`);
-    }
-    if(activeCameraIndex >= 0) {
-      let cam = CAMERA_EVENTS[activeCameraIndex];
-      let deltaTime = (currentTime - cam.time) / (activeCameraIndex + 1 < CAMERA_EVENTS.length ? (CAMERA_EVENTS[activeCameraIndex + 1].time - cam.time) : 30000);
-      setView(vec3Add(cam.obj.eye, vec3Scale(cam.obj.moveEye, deltaTime * cam.obj.speed * GLOBAL_CAM_SPEED)), calcUnsteadyDir(cam.obj.dir, cam.obj.unsteady));
-    }
+  if(activeCameraEventIndex >= 0) {
+    let cam = CAMERA_EVENTS[activeCameraEventIndex];
+    let deltaTime = (currentTime - cam.time) / (activeCameraEventIndex + 1 < CAMERA_EVENTS.length ? (CAMERA_EVENTS[activeCameraEventIndex + 1].time - cam.time) : 30000);
+    setView(vec3Add(cam.obj.eye, vec3Scale(cam.obj.moveEye, deltaTime * cam.obj.speed * GLOBAL_CAM_SPEED)), calcUnsteadyDir(cam.obj.dir, cam.obj.unsteady));
   }
 }
 
 function calcUnsteadyDir(dir, amp)
 {
-  let t = (currentTime + simulationStep) * 0.00125;
+  let t = currentTime;
   let unsteady = vec3Normalize(vec3Add(dir, vec3Scale(
     [ 0.4 * Math.cos(1.3 * t + Math.sin(t * 0.3)),
       Math.pow(0.3 * Math.cos(t * 0.4), 3.0),
-      0.5 * Math.cos(t * 1.3 + Math.cos(t))], 0.018 * amp)));
+      0.5 * Math.cos(t * 1.3 + Math.cos(t))], 0.001 * amp)));
   return unsteady;
 }
 
 function setGrid(obj)
 {
+  if(obj.gridRes === undefined)
+    return;
+
   for(let i=0; i<grid.length; i++)
     grid[i] = 0;
 
@@ -497,6 +478,8 @@ function setGrid(obj)
   grid[1] = gridRes;
   grid[2] = gridRes * gridRes;
 
+  // grid[3] is reserved as offset for buffer update position
+
   const center = gridRes / 2;
   const min = center - obj.area;
   const max = center + obj.area;
@@ -504,7 +487,7 @@ function setGrid(obj)
   for(let k=min; k<max; k++)
     for(let j=min; j<max; j++)
       for(let i=min; i<max; i++)
-        grid[3 + gridRes * gridRes * k + gridRes * j + i] = rand() > 0.7 ? 1 : 0;
+        grid[4 + gridRes * gridRes * k + gridRes * j + i] = rand() > 0.7 ? 1 : 0;
 
   device.queue.writeBuffer(gridBuffer[0], 0, grid);
   device.queue.writeBuffer(gridBuffer[1], 0, grid);
@@ -514,6 +497,9 @@ function setGrid(obj)
 
 function setRules(obj)
 {
+  if(obj.ruleSet === undefined)
+    return;
+
   let rulesBitsBigInt = RULES[obj.ruleSet];
 
   // State count (bit 0-3)
@@ -530,6 +516,9 @@ function setRules(obj)
 
 function setTime(obj)
 {
+  if(obj.delta === undefined)
+    return;
+
   if(obj.delta == 0)
     simulationIterationPaused = !simulationIterationPaused;
   else
@@ -548,17 +537,17 @@ function setView(e, f)
 
 function recordGridEvent(obj)
 {
-  console.log(`{ step: ${(SIMULATION_STEP_OFS + simulationStep)}, obj: { gridRes: ${gridRes}, seed: ${seed}, area: ${obj.area} } }, // GRID_EVENT`);
+  console.log(`{ time: ${currentTime.toFixed(2)}, obj: { gridRes: ${gridRes}, seed: ${seed}, area: ${obj.area} } }, // GRID_EVENT`);
 }
 
 function recordRulesEvent(obj)
 {
-  console.log(`{ step: ${(SIMULATION_STEP_OFS + simulationStep)}, obj: { ruleSet: ${obj.ruleSet} } }, // RULE_EVENT (${RULES_NAMES[obj.ruleSet]})`);
+  console.log(`{ time: ${currentTime.toFixed(2)}, obj: { ruleSet: ${obj.ruleSet} } }, // RULE_EVENT (${RULES_NAMES[obj.ruleSet]})`);
 }
 
 function recordTimeEvent(obj)
 {
-  console.log(`{ step: ${(SIMULATION_STEP_OFS + simulationStep)}, obj: { delta: ${obj.delta} } }, // TIME_EVENT (paused: ${simulationIterationPaused}, updateDelay: ${updateDelay})`);
+  console.log(`{ time: ${currentTime.toFixed(2)}, obj: { delta: ${obj.delta.toFixed(2)} } }, // TIME_EVENT (paused: ${simulationIterationPaused}, updateDelay: ${updateDelay})`);
 }
 
 function recordCameraEvent(obj)
@@ -571,7 +560,7 @@ function recordCameraEvent(obj)
   if(obj.speed !== undefined)
     optional += `, speed: ${obj.speed}`;
 
-  console.log(`{ time: ${(idle ? startIdleTime.toFixed(0) : currentTime.toFixed(0))}, obj: { eye: [${obj.eye[0].toFixed(2)}, ${obj.eye[1].toFixed(2)}, ${obj.eye[2].toFixed(2)}], ` +
+  console.log(`{ time: ${currentTime.toFixed(2)}, obj: { eye: [${obj.eye[0].toFixed(2)}, ${obj.eye[1].toFixed(2)}, ${obj.eye[2].toFixed(2)}], ` +
     `dirPhi: ${Math.atan2(obj.dir[1], obj.dir[0]).toFixed(4)}, dirTheta: ${Math.acos(obj.dir[2]).toFixed(4)}${optional} } }, // CAMERA_EVENT`);
 }
 
@@ -676,24 +665,24 @@ function handleCameraControlEvent(e)
 async function handleKeyEvent(e)
 {    
   // Rules 0-9
-  if(e.key !== " " && !isNaN(e.key))
+  if(e.key != " " && !isNaN(e.key))
   {
     setRules({ ruleSet: parseInt(e.key, 10) });
     return;
   }
 
   // Rules 10+ via shift
-  if(e.key === "(") {
+  if(e.key == "(") {
     setRules({ ruleSet: 10 });
     return;
   }
 
-  if(e.key === ")") {
+  if(e.key == ")") {
     setRules({ ruleSet: 11 });
     return;
   }
 
-  if(e.key === "=") {
+  if(e.key == "=") {
     setRules({ ruleSet: 12 });
     return;
   }
@@ -701,9 +690,6 @@ async function handleKeyEvent(e)
   switch (e.key) {
     case "v":
       resetView();
-      break;
-    case "o":
-      overviewCamera = !overviewCamera;
       break;
     case "l":
       createPipelines();
@@ -719,13 +705,9 @@ async function handleKeyEvent(e)
       if(idle) {
         if(AUDIO)
           await suspendAudio();
-        else
-          startIdleTime = currentTime;
       } else {
         if(AUDIO)
           await playAudio();
-        else
-          startTime += currentTime - startIdleTime;
       }
       console.log("Idle mode " + (idle ? "enabled" : "disabled"));
       break;
@@ -733,10 +715,11 @@ async function handleKeyEvent(e)
       setGrid({ gridRes: MAX_GRID_RES, seed: seed, area: 4 });
       break;
     case "+":
-      setTime({ delta: 50 });
+      setTime({ delta: 0.25 });
       break;
     case "-":
-      setTime({ delta: -50 });
+      if(updateDelay > 0)
+        setTime({ delta: -0.25 });
       break;
     case "#": 
       setTime({ delta: 0 }); // Pause simulation (but intro time goes on)
@@ -777,14 +760,13 @@ async function handleKeyEvent(e)
       seed = undefined;
       updateDelay = DEFAULT_UPDATE_DELAY;
       startTime = undefined;
-      startIdleTime = 0;
       currentTime = 0;
       lastSimulationUpdateTime = 0;
-      simulationStep = 0;
-      activeSimulationStep = -1;
       simulationIterationPaused = false;
       simulationIteration = 0;
-      activeCameraIndex = -1;
+      gridBufferUpdateOffset = 0;
+      activeSimulationEventIndex = -1;
+      activeCameraEventIndex = -1;
       if(AUDIO && !idle)
         await playAudio();
       break;
@@ -828,13 +810,8 @@ async function startRender()
   }
 
   completeCameras();
-
+  resetView();
   updateSimulation();
-
-  // In case we start in idle or recording mode
-  if(!overviewCamera)
-    resetView();
-
   updateCamera();
 
   document.querySelector("button").removeEventListener("click", startRender);
@@ -906,7 +883,7 @@ async function main()
   }
 
   // Grid mul + grid
-  grid = new Uint32Array(3 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
+  grid = new Uint32Array(4 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
   
   // State count + alive rules + birth rules
   rules = new Uint32Array(1 + 2 * 27);

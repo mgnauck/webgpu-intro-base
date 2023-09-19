@@ -5,14 +5,15 @@ struct Uniforms
   up: vec3f,
   time: f32,
   forward: vec3f,
-  simulationStep: f32,
+  freeValue1: f32,
   eye: vec3f,
-  freeValue: f32
+  freeValue2: f32
 }
 
 struct Grid
 {
   mul: vec3i,
+  zOfs: u32,
   arr: array<u32>
 }
 
@@ -107,7 +108,12 @@ fn evalState(pos: vec3i, states: u32)
 @compute @workgroup_size(4,4,4)
 fn computeMain(@builtin(global_invocation_id) globalId: vec3u)
 {
-  evalState(vec3i(globalId), rules.states);
+  var pos = vec3i(i32(globalId.x), i32(globalId.y), i32(globalId.z + grid.zOfs));
+  if(pos.z >= grid.mul.y) {
+    return;
+  }
+
+  evalState(pos, rules.states);
 }
 
 fn minComp(v: vec3f) -> f32
