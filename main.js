@@ -6,7 +6,7 @@ const DISABLE_RENDERING = false;
 const AUDIO_RELOAD_INTERVAL = 0; // Reload interval in seconds, 0 = disabled
 const AUDIO_SHADER_FILE = "audio.wgsl";
 
-const IDLE = false;
+const IDLE = true;
 const RECORDING = true;
 
 const ASPECT = 1.6;
@@ -113,6 +113,20 @@ const CAMERA_EVENTS = [
   { time: 5, obj: { eye: [-21.47, 118.41, -7.01], dirPhi: -0.5561, dirTheta: 1.0594, moveEyePhi: -0.6081, moveEyeTheta: 0.9807 } }, // CAMERA_EVENT
   { time: 20, obj: { eye: [122.11, 27.74, 129.76], dirPhi: 2.6738, dirTheta: 2.3647, moveEyePhi: 0.0000, moveEyeTheta: 3.0183 } }, // CAMERA_EVENT
   { time: 50, obj: { eye: [133.37, 134.02, 133.47], dirPhi: -2.2577, dirTheta: 2.1886 } }, // CAMERA_EVENT
+];
+
+// 46x10
+const LOGO = [
+1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
+1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
+1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
+1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
+1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
+1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
+0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
 ];
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
@@ -483,6 +497,8 @@ function setGrid(obj)
   // grid[3] is reserved as offset for buffer update position
 
   const center = gridRes / 2;
+  
+  /*
   const min = center - obj.area;
   const max = center + obj.area;
 
@@ -490,6 +506,13 @@ function setGrid(obj)
     for(let j=min; j<max; j++)
       for(let i=min; i<max; i++)
         grid[4 + gridRes * gridRes * k + gridRes * j + i] = rand() > 0.7 ? 1 : 0;
+  */
+ 
+  // Logo
+  for(let k=0; k<12; k++)
+    for(let j=0; j<10; j++)
+      for(let i=0; i<46; i++)
+        grid[4 + gridRes * gridRes * (center - 6 + k) + gridRes * (center - 5 + j) + (center - 23 + i)] = LOGO[46 * (9 - j) + i];
 
   device.queue.writeBuffer(gridBuffer[0], 0, grid);
   device.queue.writeBuffer(gridBuffer[1], 0, grid);
