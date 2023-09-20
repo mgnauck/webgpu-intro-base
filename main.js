@@ -63,9 +63,9 @@ let rules;
 let startTime;
 let currentTime = 0;
 let lastSimulationUpdateTime = 0;
-let simulationIterationPaused = false;
 let simulationIteration = 0;
 let gridBufferUpdateOffset = 0;
+let activeRuleSet = -1;
 let activeSimulationEventIndex = -1;
 let activeCameraEventIndex = -1;
 
@@ -105,7 +105,9 @@ const RULES_NAMES = [
 
 const SIMULATION_EVENTS = [
   { time: 0, obj: { ruleSet: 2, gridRes: 128, seed: 1846359466, area: 40 } },
-  { time: 20, obj: { delta: 0 } },
+  { time: 20, obj: { ruleSet: -1 } },
+  { time: 30, obj: { ruleSet: 1, delta: -0.5 } },
+  { time: 50, obj: { delta: 1 } },
 ];
 
 const CAMERA_EVENTS = [
@@ -376,23 +378,25 @@ function render(time)
     updateCamera();
   }
  
-  if(!idle && !simulationIterationPaused && gridBufferUpdateOffset < gridRes) {
-    const count = Math.ceil(gridRes / 4);
-    device.queue.writeBuffer(gridBuffer[simulationIteration % 2], 12, new Uint32Array([gridBufferUpdateOffset]));
-    encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], count, count, count / SIMULATION_UPDATE_STEPS); 
-    gridBufferUpdateOffset += count / SIMULATION_UPDATE_STEPS * 4;
-  }
-
-  if(!idle && currentTime - lastSimulationUpdateTime > updateDelay) {
-    if(gridBufferUpdateOffset >= gridRes) {
-      if(!simulationIterationPaused)
-        simulationIteration++;
-      gridBufferUpdateOffset = 0;
-      lastSimulationUpdateTime = currentTime;
-    } else {
-      if(!simulationIterationPaused)
-        console.log("Simulation update not finished within time budget.");
+  if(!idle && activeRuleSet >= 0) {
+    if(gridBufferUpdateOffset < gridRes) {
+      const count = Math.ceil(gridRes / 4);
+      device.queue.writeBuffer(gridBuffer[simulationIteration % 2], 12, new Uint32Array([gridBufferUpdateOffset]));
+      encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], count, count, count / SIMULATION_UPDATE_STEPS); 
+      gridBufferUpdateOffset += count / SIMULATION_UPDATE_STEPS * 4;
     }
+    if(currentTime - lastSimulationUpdateTime > updateDelay) {
+      if(gridBufferUpdateOffset >= gridRes) {
+        simulationIteration++;
+        gridBufferUpdateOffset = 0;
+        lastSimulationUpdateTime = currentTime;
+      } else {
+        console.log("Simulation update not finished within time budget.");
+      }
+    }
+  } else {
+    gridBufferUpdateOffset = 0;
+    lastSimulationUpdateTime = currentTime;
   }
 
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
@@ -497,34 +501,27 @@ function setGrid(obj)
 
 function setRules(obj)
 {
-  if(obj.ruleSet === undefined)
-    return;
-
-  let rulesBitsBigInt = RULES[obj.ruleSet];
-
-  // State count (bit 0-3)
-  rules[0] = Number(rulesBitsBigInt & BigInt(0xf));
-
-  // Alive bits (4-31), birth bits (32-59)
-  for(let i=0; i<rules.length - 1; i++)
-    rules[1 + i] = Number((rulesBitsBigInt >> BigInt(4 + i)) & BigInt(0x1));
-
-  device.queue.writeBuffer(rulesBuffer, 0, rules);
-
-  recordRulesEvent(obj);
+  if(obj.ruleSet !== undefined) {
+    activeRuleSet = obj.ruleSet;
+    if(activeRuleSet >= 0) {
+      let rulesBitsBigInt = RULES[activeRuleSet];
+      // State count (bit 0-3)
+      rules[0] = Number(rulesBitsBigInt & BigInt(0xf));
+      // Alive bits (4-31), birth bits (32-59)
+      for(let i=0; i<rules.length - 1; i++)
+        rules[1 + i] = Number((rulesBitsBigInt >> BigInt(4 + i)) & BigInt(0x1));
+      device.queue.writeBuffer(rulesBuffer, 0, rules);
+    }
+    recordRulesEvent(obj);
+  }
 }
 
 function setTime(obj)
 {
-  if(obj.delta === undefined)
-    return;
-
-  if(obj.delta == 0)
-    simulationIterationPaused = !simulationIterationPaused;
-  else
+  if(obj.delta !== undefined) {
     updateDelay += obj.delta;
-
-  recordTimeEvent(obj);
+    recordTimeEvent(obj);
+  }
 }
 
 function setView(e, f)
@@ -547,7 +544,7 @@ function recordRulesEvent(obj)
 
 function recordTimeEvent(obj)
 {
-  console.log(`{ time: ${currentTime.toFixed(2)}, obj: { delta: ${obj.delta.toFixed(2)} } }, // TIME_EVENT (paused: ${simulationIterationPaused}, updateDelay: ${updateDelay})`);
+  console.log(`{ time: ${currentTime.toFixed(2)}, obj: { delta: ${obj.delta.toFixed(2)} } }, // TIME_EVENT (updateDelay: ${updateDelay})`);
 }
 
 function recordCameraEvent(obj)
@@ -762,9 +759,9 @@ async function handleKeyEvent(e)
       startTime = undefined;
       currentTime = 0;
       lastSimulationUpdateTime = 0;
-      simulationIterationPaused = false;
       simulationIteration = 0;
       gridBufferUpdateOffset = 0;
+      activeRuleSet = -1;
       activeSimulationEventIndex = -1;
       activeCameraEventIndex = -1;
       if(AUDIO && !idle)
@@ -856,13 +853,9 @@ async function main()
     throw new Error("Can not use WebGPU. No GPU adapter available.");
 
   console.log("GPU adapter features:");
-  const gpuAdapterFeatures = gpuAdapter.features;
-  gpuAdapterFeatures.forEach((value) => console.log(value));
-  console.log("---");
-
+  gpuAdapter.features.forEach((value) => console.log(value));
   console.log("GPU adapter limits:");
   console.log(gpuAdapter.limits);
-  console.log("---");
 
   device = await gpuAdapter.requestDevice();
   if(!device)
@@ -882,7 +875,7 @@ async function main()
     await renderAudio();
   }
 
-  // Grid mul + grid
+  // Grid mul + buffer update z-offset + grid
   grid = new Uint32Array(4 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
   
   // State count + alive rules + birth rules
