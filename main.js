@@ -7,7 +7,7 @@ const AUDIO_RELOAD_INTERVAL = 0; // Reload interval in seconds, 0 = disabled
 const AUDIO_SHADER_FILE = "audio.wgsl";
 
 const IDLE = false;
-const RECORDING = false;
+const RECORDING = true;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 1024;
@@ -61,7 +61,7 @@ let grid;
 let rules;
 
 let startTime;
-let currentTime = 0;
+let timeInBeats = 0;
 let lastSimulationUpdateTime = 0;
 let simulationIteration = 0;
 let gridBufferUpdateOffset = 0;
@@ -72,6 +72,7 @@ let activeCameraEventIndex = -1;
 let cameraReference;
 
 const RULES = [
+  0, // not in use, leave it here, we need it for enable/disable magic
   2023103542460421n, // clouds-5, key 0
   34359738629n, // 4/4-5, key 1
   97240207056901n, // amoeba-5, key 2
@@ -82,12 +83,11 @@ const RULES = [
   96793530462218n, // ripple-10, key 7
   37688665960915591n, // shells-7, key 8
   30064771210n, // pulse-10, key 9
-  962072681477n, // 678-5, key (
   4294970885n, // more-builds-5, key )
-  2216617588948994n, // stable-2, key =
 ];
 
 const RULES_NAMES = [
+  "UNUSED",
   "clouds-5",
   "4/4-5",
   "amoeba-5",
@@ -98,23 +98,21 @@ const RULES_NAMES = [
   "ripple-10",
   "shells-7",
   "pulse-10",
-  "678-5",
   "more-builds-5",
-  "stable-2",
 ];
 
 const SIMULATION_EVENTS = [
-  { time: 0, obj: { ruleSet: 2, gridRes: 128, seed: 1846359466, area: 40 } },
+  { time: 0, obj: { ruleSet: 3, gridRes: 128, seed: 1846359466, area: 40 } },
   { time: 20, obj: { ruleSet: -1 } },
-  { time: 30, obj: { ruleSet: 1, delta: -0.5 } },
+  { time: 30, obj: { ruleSet: 2, delta: -0.5 } },
   { time: 50, obj: { delta: 1 } },
 ];
 
 const CAMERA_EVENTS = [
   { time: 0, obj: { eye: [133.37, 134.02, 133.47], dirPhi: -2.2577, dirTheta: 2.1886 } }, // CAMERA_EVENT
-  { time: 6.25, obj: { eye: [-21.47, 118.41, -7.01], dirPhi: -0.5561, dirTheta: 1.0594, moveEyePhi: -0.6081, moveEyeTheta: 0.9807 } }, // CAMERA_EVENT
-  { time: 15, obj: { eye: [122.11, 27.74, 129.76], dirPhi: 2.6738, dirTheta: 2.3647, moveEyePhi: 0.0000, moveEyeTheta: 3.0183 } }, // CAMERA_EVENT
-  { time: 20, obj: { eye: [133.37, 134.02, 133.47], dirPhi: -2.2577, dirTheta: 2.1886 } }, // CAMERA_EVENT
+  { time: 5, obj: { eye: [-21.47, 118.41, -7.01], dirPhi: -0.5561, dirTheta: 1.0594, moveEyePhi: -0.6081, moveEyeTheta: 0.9807 } }, // CAMERA_EVENT
+  { time: 20, obj: { eye: [122.11, 27.74, 129.76], dirPhi: 2.6738, dirTheta: 2.3647, moveEyePhi: 0.0000, moveEyeTheta: 3.0183 } }, // CAMERA_EVENT
+  { time: 50, obj: { eye: [133.37, 134.02, 133.47], dirPhi: -2.2577, dirTheta: 2.1886 } }, // CAMERA_EVENT
 ];
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
@@ -274,7 +272,7 @@ async function playAudio()
   if(audioContext.state === "suspended")
     await audioContext.resume();
  
-  audioBufferSourceNode.start(0, currentTime / 1000.0);
+  audioBufferSourceNode.start(0, timeInBeats / BPM / 60);
 }
 
 async function reloadAudio()
@@ -362,14 +360,15 @@ function render(time)
   }
   last = performance.now();
 
-  time = (AUDIO ? audioContext.currentTime : time) * BPM / 60; // time in beats
-
+  // Get current time
+  time = (AUDIO ? audioContext.currentTime : time);
   if(startTime === undefined) {
     startTime = time;
     console.log("Set startTime: " + startTime);
   }
 
-  currentTime = time - startTime;
+  // Intro uses time in beats everywhere
+  timeInBeats = (time - startTime) * BPM / 60;
 
   const commandEncoder = device.createCommandEncoder();
   
@@ -385,29 +384,29 @@ function render(time)
       encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], count, count, count / SIMULATION_UPDATE_STEPS); 
       gridBufferUpdateOffset += count / SIMULATION_UPDATE_STEPS * 4;
     }
-    if(currentTime - lastSimulationUpdateTime > updateDelay) {
+    if(timeInBeats - lastSimulationUpdateTime > updateDelay) {
       if(gridBufferUpdateOffset >= gridRes) {
         simulationIteration++;
         gridBufferUpdateOffset = 0;
-        lastSimulationUpdateTime = currentTime;
+        lastSimulationUpdateTime = timeInBeats;
       } else {
         console.log("Simulation update not finished within time budget.");
       }
     }
   } else {
     gridBufferUpdateOffset = 0;
-    lastSimulationUpdateTime = currentTime;
+    lastSimulationUpdateTime = timeInBeats;
   }
 
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
     ...right,
     0.5 / Math.tan(0.5 * FOV * Math.PI / 180.0),
     ...up,
-    currentTime,
+    timeInBeats,
     ...dir,
-    1.0, // free value 1
+    Math.abs(activeRuleSet) - 1,
     ...eye,
-    1.0 // free value 2
+    1.0 // free value
   ]));
 
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
@@ -433,7 +432,7 @@ function setPerformanceTimer(timerName)
 
 function updateSimulation()
 {
-  if(activeSimulationEventIndex + 1 < SIMULATION_EVENTS.length && currentTime >= SIMULATION_EVENTS[activeSimulationEventIndex + 1].time) {
+  if(activeSimulationEventIndex + 1 < SIMULATION_EVENTS.length && timeInBeats >= SIMULATION_EVENTS[activeSimulationEventIndex + 1].time) {
     let eventObj = SIMULATION_EVENTS[++activeSimulationEventIndex].obj;
     setGrid(eventObj);
     setRules(eventObj);
@@ -443,23 +442,22 @@ function updateSimulation()
 
 function updateCamera()
 {
-  if(activeCameraEventIndex + 1 < CAMERA_EVENTS.length && currentTime >= CAMERA_EVENTS[activeCameraEventIndex + 1].time)
+  if(activeCameraEventIndex + 1 < CAMERA_EVENTS.length && timeInBeats >= CAMERA_EVENTS[activeCameraEventIndex + 1].time)
     recordCameraEvent(CAMERA_EVENTS[++activeCameraEventIndex].obj);
 
   if(activeCameraEventIndex >= 0) {
     let cam = CAMERA_EVENTS[activeCameraEventIndex];
-    let deltaTime = (currentTime - cam.time) / (activeCameraEventIndex + 1 < CAMERA_EVENTS.length ? (CAMERA_EVENTS[activeCameraEventIndex + 1].time - cam.time) : 30000);
+    let deltaTime = (timeInBeats - cam.time) / (activeCameraEventIndex + 1 < CAMERA_EVENTS.length ? (CAMERA_EVENTS[activeCameraEventIndex + 1].time - cam.time) : 30);
     setView(vec3Add(cam.obj.eye, vec3Scale(cam.obj.moveEye, deltaTime * cam.obj.speed * GLOBAL_CAM_SPEED)), calcUnsteadyDir(cam.obj.dir, cam.obj.unsteady));
   }
 }
 
 function calcUnsteadyDir(dir, amp)
 {
-  let t = currentTime;
   let unsteady = vec3Normalize(vec3Add(dir, vec3Scale(
-    [ 0.4 * Math.cos(1.3 * t + Math.sin(t * 0.3)),
-      Math.pow(0.3 * Math.cos(t * 0.4), 3.0),
-      0.5 * Math.cos(t * 1.3 + Math.cos(t))], 0.001 * amp)));
+    [ 0.4 * Math.cos(1.3 * timeInBeats + Math.sin(timeInBeats * 0.3)),
+      Math.pow(0.3 * Math.cos(timeInBeats * 0.4), 3.0),
+      0.5 * Math.cos(timeInBeats * 1.3 + Math.cos(timeInBeats))], 0.001 * amp)));
   return unsteady;
 }
 
@@ -502,8 +500,8 @@ function setGrid(obj)
 function setRules(obj)
 {
   if(obj.ruleSet !== undefined) {
-    activeRuleSet = obj.ruleSet;
-    if(activeRuleSet >= 0) {
+    activeRuleSet = (obj.ruleSet == -1) ? -activeRuleSet : obj.ruleSet; // -1 toggles current rules set between active/inactive
+    if(activeRuleSet > 0) {
       let rulesBitsBigInt = RULES[activeRuleSet];
       // State count (bit 0-3)
       rules[0] = Number(rulesBitsBigInt & BigInt(0xf));
@@ -534,17 +532,17 @@ function setView(e, f)
 
 function recordGridEvent(obj)
 {
-  console.log(`{ time: ${currentTime.toFixed(2)}, obj: { gridRes: ${gridRes}, seed: ${seed}, area: ${obj.area} } }, // GRID_EVENT`);
+  console.log(`{ time: ${timeInBeats.toFixed(2)}, obj: { gridRes: ${gridRes}, seed: ${seed}, area: ${obj.area} } }, // GRID_EVENT`);
 }
 
 function recordRulesEvent(obj)
 {
-  console.log(`{ time: ${currentTime.toFixed(2)}, obj: { ruleSet: ${obj.ruleSet} } }, // RULE_EVENT (${RULES_NAMES[obj.ruleSet]})`);
+  console.log(`{ time: ${timeInBeats.toFixed(2)}, obj: { ruleSet: ${obj.ruleSet} } }, // RULE_EVENT (${RULES_NAMES[Math.abs(activeRuleSet)]})`);
 }
 
 function recordTimeEvent(obj)
 {
-  console.log(`{ time: ${currentTime.toFixed(2)}, obj: { delta: ${obj.delta.toFixed(2)} } }, // TIME_EVENT (updateDelay: ${updateDelay})`);
+  console.log(`{ time: ${timeInBeats.toFixed(2)}, obj: { delta: ${obj.delta.toFixed(2)} } }, // TIME_EVENT (updateDelay: ${updateDelay})`);
 }
 
 function recordCameraEvent(obj)
@@ -557,7 +555,7 @@ function recordCameraEvent(obj)
   if(obj.speed !== undefined)
     optional += `, speed: ${obj.speed}`;
 
-  console.log(`{ time: ${currentTime.toFixed(2)}, obj: { eye: [${obj.eye[0].toFixed(2)}, ${obj.eye[1].toFixed(2)}, ${obj.eye[2].toFixed(2)}], ` +
+  console.log(`{ time: ${timeInBeats.toFixed(2)}, obj: { eye: [${obj.eye[0].toFixed(2)}, ${obj.eye[1].toFixed(2)}, ${obj.eye[2].toFixed(2)}], ` +
     `dirPhi: ${Math.atan2(obj.dir[1], obj.dir[0]).toFixed(4)}, dirTheta: ${Math.acos(obj.dir[2]).toFixed(4)}${optional} } }, // CAMERA_EVENT`);
 }
 
@@ -661,26 +659,16 @@ function handleCameraControlEvent(e)
 
 async function handleKeyEvent(e)
 {    
-  // Rules 0-9
+  // Rule sets 1-10 (keys 0-9)
   if(e.key != " " && !isNaN(e.key))
   {
-    setRules({ ruleSet: parseInt(e.key, 10) });
+    setRules({ ruleSet: parseInt(e.key, 10) + 1 });
     return;
   }
 
-  // Rules 10+ via shift
-  if(e.key == "(") {
-    setRules({ ruleSet: 10 });
-    return;
-  }
-
-  if(e.key == ")") {
-    setRules({ ruleSet: 11 });
-    return;
-  }
-
+  // Rule set 11 (key =)
   if(e.key == "=") {
-    setRules({ ruleSet: 12 });
+    setRules({ ruleSet: 11 });
     return;
   }
 
@@ -718,8 +706,8 @@ async function handleKeyEvent(e)
       if(updateDelay > 0)
         setTime({ delta: -0.25 });
       break;
-    case "#": 
-      setTime({ delta: 0 }); // Pause simulation (but intro time goes on)
+    case "#":
+      setRules({ ruleSet: -1 }); // Toggle rule set, i.e. pause/run simulation
       break;
     case ".":
       // Records a STATIC cam
@@ -757,7 +745,7 @@ async function handleKeyEvent(e)
       seed = undefined;
       updateDelay = DEFAULT_UPDATE_DELAY;
       startTime = undefined;
-      currentTime = 0;
+      timeInBeats = 0;
       lastSimulationUpdateTime = 0;
       simulationIteration = 0;
       gridBufferUpdateOffset = 0;
@@ -852,9 +840,6 @@ async function main()
   if(!gpuAdapter)
     throw new Error("Can not use WebGPU. No GPU adapter available.");
 
-  console.log("GPU adapter features:");
-  gpuAdapter.features.forEach((value) => console.log(value));
-  console.log("GPU adapter limits:");
   console.log(gpuAdapter.limits);
 
   device = await gpuAdapter.requestDevice();

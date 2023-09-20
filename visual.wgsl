@@ -5,7 +5,7 @@ struct Uniforms
   up: vec3f,
   time: f32,
   forward: vec3f,
-  freeValue1: f32,
+  ruleSet: f32,
   eye: vec3f,
   freeValue2: f32
 }
@@ -39,6 +39,19 @@ const HEIGHT = WIDTH / 1.6;
 const EPSILON = 0.001;
 const PI = 3.141;
 const TWO_PI = PI * 2.0;
+
+const ruleSetTints = array<vec3f, 11>(
+  vec3f(1.3), // clouds-5
+  vec3f(1), // 44-5
+  vec3f(0.6, 0.3, 0.3), // amoeba-5
+  vec3f(0.3, 0.3, 0.6), // pyro-10
+  vec3f(0.2, 0.4, 0.5), // framework-5
+  vec3f(0.4, 0.1, 0.4), // spiky-10
+  vec3f(0.1, 0.4, 0.2), // builder-10
+  vec3f(0.4, 0.1, 0.2), // ripple-10
+  vec3f(0.3, 0.7, 0.1), // shells-7
+  vec3f(0.1, 0.3, 0.2), // pulse-10
+  vec3f(0.3, 0.4, 0.8)); // more-builds-5
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(0) @binding(1) var<storage> grid: Grid;
@@ -215,7 +228,7 @@ fn shade(pos: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> vec3f
 
   let val = f32(rules.states) / f32(min((*hit).state, rules.states));
   let sky = 0.4 + (*hit).norm.y * 0.6;
-  let col = vec3f(0.005) + pos / f32(grid.mul.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
+  let col = vec3f(0.005) + ruleSetTints[u32(uniforms.ruleSet)] * pos / f32(grid.mul.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
   let occ = calcOcclusion(pos, (*hit).index, vec3i((*hit).norm));
 
   return col * occ * occ * occ;
@@ -226,24 +239,6 @@ fn background(ori: vec3f, dir: vec3f) -> vec3f
   // TODO Make much better background
   let a = 0.5 + abs(dir.y) * 0.5;
   return 0.05 * vec3f(0.3, 0.3, 0.4) * vec3f(pow(a, 42.0)); 
-}
-
-// https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
-fn filmicToneACES(x: vec3f) -> vec3f
-{
-  let a = 2.51;
-  let b = 0.03;
-  let c = 2.43;
-  let d = 0.59;
-  let e = 0.14;
-  return saturate(x * (a * x + vec3f(b)) / (x * (c * x + vec3f(d)) + vec3f(e)));
-}
-
-@vertex
-fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f
-{
-  let pos = array<vec2f, 4>(vec2f(-1, 1), vec2f(-1, -1), vec2f(1), vec2f(1, -1));
-  return vec4f(pos[vertexIndex], 0, 1);
 }
 
 fn trace(ori: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> bool
@@ -267,6 +262,24 @@ fn trace(ori: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> bool
   return false;
 }
 
+// https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
+fn filmicToneACES(x: vec3f) -> vec3f
+{
+  let a = 2.51;
+  let b = 0.03;
+  let c = 2.43;
+  let d = 0.59;
+  let e = 0.14;
+  return saturate(x * (a * x + vec3f(b)) / (x * (c * x + vec3f(d)) + vec3f(e)));
+}
+
+@vertex
+fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f
+{
+  let pos = array<vec2f, 4>(vec2f(-1, 1), vec2f(-1, -1), vec2f(1), vec2f(1, -1));
+  return vec4f(pos[vertexIndex], 0, 1);
+}
+
 @fragment
 fn fragmentMain(@builtin(position) position: vec4f) -> @location(0) vec4f
 {
@@ -277,7 +290,12 @@ fn fragmentMain(@builtin(position) position: vec4f) -> @location(0) vec4f
 
   var col = vec3f(0.0);
   var hit: Hit;
+
+  // Normal cell grid
+  trace(ori, dir, &hit);
+  col = hit.col;
  
+  /*
   // Normal cell grid with ground reflection
   if(!trace(ori, dir, &hit)) {
     var t: f32;
@@ -289,6 +307,7 @@ fn fragmentMain(@builtin(position) position: vec4f) -> @location(0) vec4f
     }
   }
   col = hit.col;
+  */
 
   /*
   // All cells reflecting
