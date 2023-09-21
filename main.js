@@ -106,7 +106,7 @@ const SIMULATION_EVENTS = [
 { time: 60, obj: { ruleSet: 3 } },
 { time: 80, obj: { ruleSet: 1 } },
 { time: 120, obj: { ruleSet: 8 } },
-{ time: 160, obj: { ruleSet: -8 } },
+{ time: 180, obj: { ruleSet: -8 } },
 ];
 
 const CAMERA_EVENTS = [
@@ -115,7 +115,7 @@ const CAMERA_EVENTS = [
 { time: 60, obj: [ 240, -4.4042, -0.7000 ] },
 { time: 80, obj: [ 210, -5.7792, 0.8000 ] },
 { time: 120, obj: [ 180, -2.7960, -0.7000 ] },
-{ time: 160, obj: [ 250, -1.2960, 0.4000 ] },
+{ time: 180, obj: [ 250, -1.9600, 0.5000] },
 ];
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
