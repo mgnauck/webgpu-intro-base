@@ -165,7 +165,8 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, hit: ptr<function, Hit>) -
   var t = (vec3f(0.5) + 0.5 * stepDir - fract(ori)) * invDir;
   var mask: vec3f;
 
-  (*hit).index = i32(dot(mulf, floor(ori)));
+  // Assumes grid is centered at 0/0/0
+  (*hit).index = i32(dot(mulf, floor(vec3f(mulf.y * 0.5) + ori)));
 
   loop {
     (*hit).dist = minComp(t);
@@ -230,7 +231,7 @@ fn shade(pos: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> vec3f
 
   let val = f32(rules.states) / f32(min((*hit).state, rules.states));
   let sky = 0.4 + (*hit).norm.y * 0.6;
-  let col = vec3f(0.005) + ruleSetTints[u32(uniforms.ruleSet)] * pos / f32(grid.mul.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
+  let col = vec3f(0.005) + ruleSetTints[u32(uniforms.ruleSet)] * (vec3f(0.5) + pos / f32(grid.mul.y)) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
   let occ = calcOcclusion(pos, (*hit).index, vec3i((*hit).norm));
 
   return col * occ * occ * occ;
@@ -248,8 +249,9 @@ fn trace(ori: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> bool
   let invDir = 1.0 / dir;
   var tmin: f32;
   var tmax: f32;
+  let halfGrid = vec3f(f32(grid.mul.y / 2));
 
-  if(intersectAabb(vec3f(0), vec3f(f32(grid.mul.y)), ori, invDir, &tmin, &tmax)) {
+  if(intersectAabb(-halfGrid, halfGrid, ori, invDir, &tmin, &tmax)) {
     tmin = max(tmin - EPSILON, 0.0);
     (*hit).maxDist = tmax - EPSILON - tmin;
     if(traverseGrid(ori + tmin * dir, invDir, (*hit).maxDist, hit)) {
