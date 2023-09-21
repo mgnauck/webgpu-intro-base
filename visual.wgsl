@@ -40,18 +40,20 @@ const EPSILON = 0.001;
 const PI = 3.141;
 const TWO_PI = PI * 2.0;
 
+
+// TODO Edit! For now these values just align the brightness due to changing state count.
 const ruleSetTints = array<vec3f, 11>(
-  vec3f(1.3), // clouds-5
-  vec3f(1), // 44-5
-  vec3f(0.6, 0.3, 0.3), // amoeba-5
-  vec3f(0.3, 0.3, 0.6), // pyro-10
-  vec3f(0.2, 0.4, 0.5), // framework-5
-  vec3f(0.4, 0.1, 0.4), // spiky-10
-  vec3f(0.1, 0.4, 0.2), // builder-10
-  vec3f(0.4, 0.1, 0.2), // ripple-10
-  vec3f(0.3, 0.7, 0.1), // shells-7
-  vec3f(0.1, 0.3, 0.2), // pulse-10
-  vec3f(0.3, 0.4, 0.8)); // more-builds-5
+  vec3f(1.0), // clouds-5
+  vec3f(1.0), // 44-5
+  vec3f(1.0), // amoeba-5
+  vec3f(0.25), // pyro-10
+  vec3f(1.0), // framework-5
+  vec3f(0.25), // spiky-10
+  vec3f(0.25), // builder-10
+  vec3f(0.25), // ripple-10
+  vec3f(0.5), // shells-7
+  vec3f(0.25), // pulse-10
+  vec3f(1.0)); // more-builds-5
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(0) @binding(1) var<storage> grid: Grid;
@@ -164,7 +166,7 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, hit: ptr<function, Hit>) -
   var mask: vec3f;
 
   (*hit).index = i32(dot(mulf, floor(ori)));
-  
+
   loop {
     (*hit).dist = minComp(t);
     if((*hit).dist >= tmax) {

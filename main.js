@@ -6,8 +6,9 @@ const DISABLE_RENDERING = false;
 const AUDIO_RELOAD_INTERVAL = 0; // Reload interval in seconds, 0 = disabled
 const AUDIO_SHADER_FILE = "audio.wgsl";
 
-const IDLE = true;
-const RECORDING = true;
+const IDLE = false;
+const RECORDING = false;
+const STOP_REPLAY_AT = 999;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 1024;
@@ -16,11 +17,11 @@ const FOV = 50.0;
 
 const AUDIO_BUFFER_SIZE = 4096 * 4096;
 
-const MAX_GRID_RES = 128;
+const MAX_GRID_RES = 256;
 const SIMULATION_UPDATE_STEPS = 4;
-const DEFAULT_UPDATE_DELAY = 1;
-const GLOBAL_CAM_SPEED = 5;
-const DEFAULT_CAM_SPEED = 1;
+const DEFAULT_UPDATE_DELAY = 0.375;
+const GLOBAL_CAM_SPEED = 100;
+const GLOBAL_CAM_UNSTEADY = 2.0;
 
 const MOVE_VELOCITY = 0.75;
 const LOOK_VELOCITY = 0.025;
@@ -65,7 +66,7 @@ let timeInBeats = 0;
 let lastSimulationUpdateTime = 0;
 let simulationIteration = 0;
 let gridBufferUpdateOffset = 0;
-let activeRuleSet = -1;
+let activeRuleSet = 3;
 let activeSimulationEventIndex = -1;
 let activeCameraEventIndex = -1;
 
@@ -87,7 +88,7 @@ const RULES = [
 ];
 
 const RULES_NAMES = [
-  "UNUSED",
+  "U-N-U-S-E-D",
   "clouds-5",
   "4/4-5",
   "amoeba-5",
@@ -102,31 +103,36 @@ const RULES_NAMES = [
 ];
 
 const SIMULATION_EVENTS = [
-  { time: 0, obj: { ruleSet: 3, gridRes: 128, seed: 1846359466, area: 40 } },
-  { time: 20, obj: { ruleSet: -1 } },
-  { time: 30, obj: { ruleSet: 2, delta: -0.5 } },
-  { time: 50, obj: { delta: 1 } },
+  { time: 0, obj: { ruleSet: 3, gridRes: MAX_GRID_RES, seed: 3323910494, area: 30 } },
 ];
 
 const CAMERA_EVENTS = [
-  { time: 0, obj: { eye: [133.37, 134.02, 133.47], dirPhi: -2.2577, dirTheta: 2.1886 } }, // CAMERA_EVENT
-  { time: 5, obj: { eye: [-21.47, 118.41, -7.01], dirPhi: -0.5561, dirTheta: 1.0594, moveEyePhi: -0.6081, moveEyeTheta: 0.9807 } }, // CAMERA_EVENT
-  { time: 20, obj: { eye: [122.11, 27.74, 129.76], dirPhi: 2.6738, dirTheta: 2.3647, moveEyePhi: 0.0000, moveEyeTheta: 3.0183 } }, // CAMERA_EVENT
-  { time: 50, obj: { eye: [133.37, 134.02, 133.47], dirPhi: -2.2577, dirTheta: 2.1886 } }, // CAMERA_EVENT
+  { time: 0.00, obj: { eye: [94.27, 165.67, 102.33], moveEyePhi: 2.1078, moveEyeTheta: 1.9911 } }, // CAMERA_EVENT
 ];
 
-// 46x10
+// 25x21
 const LOGO = [
-1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
-1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
-1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
-1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
-1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
-1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
-0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
+1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
+1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1,
+1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1,
+1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1,
+1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1,
+1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1,
+0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
+0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
+1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
+1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
+1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
+1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
+1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
+1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
+0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
 ];
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
@@ -286,7 +292,7 @@ async function playAudio()
   if(audioContext.state === "suspended")
     await audioContext.resume();
  
-  audioBufferSourceNode.start(0, timeInBeats / BPM / 60);
+  audioBufferSourceNode.start(0, timeInBeats / BPM * 60);
 }
 
 async function reloadAudio()
@@ -384,6 +390,12 @@ function render(time)
   // Intro uses time in beats everywhere
   timeInBeats = (time - startTime) * BPM / 60;
 
+  if(!idle && !recording && timeInBeats >= STOP_REPLAY_AT) {
+    handleKeyEvent(new KeyboardEvent("keydown", {key: " "}));
+    handleKeyEvent(new KeyboardEvent("keydown", {key: "Enter"}));
+    console.log("Stopped replay at " + timeInBeats);
+  }
+
   const commandEncoder = device.createCommandEncoder();
   
   if(!idle && !recording) {
@@ -462,7 +474,9 @@ function updateCamera()
   if(activeCameraEventIndex >= 0) {
     let cam = CAMERA_EVENTS[activeCameraEventIndex];
     let deltaTime = (timeInBeats - cam.time) / (activeCameraEventIndex + 1 < CAMERA_EVENTS.length ? (CAMERA_EVENTS[activeCameraEventIndex + 1].time - cam.time) : 30);
-    setView(vec3Add(cam.obj.eye, vec3Scale(cam.obj.moveEye, deltaTime * cam.obj.speed * GLOBAL_CAM_SPEED)), calcUnsteadyDir(cam.obj.dir, cam.obj.unsteady));
+    let eye = vec3Add(cam.obj.eye, vec3Scale(cam.obj.moveEye, deltaTime * cam.obj.speed * GLOBAL_CAM_SPEED));
+    let dir = (cam.obj.center === undefined) ? cam.obj.dir : vec3Normalize(vec3Add([gridRes / 2, gridRes / 2, gridRes / 2], vec3Negate(eye)));
+    setView(eye, calcUnsteadyDir(dir, GLOBAL_CAM_UNSTEADY * cam.obj.unsteady));
   }
 }
 
@@ -487,6 +501,10 @@ function setGrid(obj)
     seed = obj.seed === undefined ? Math.floor(Math.random() * 4294967296) : obj.seed;
     rand = splitmix32(seed);
   }
+  /*
+  seed =  Math.floor(Math.random() * 4294967296);
+  rand = splitmix32(seed);
+  */
 
   gridRes = Math.min(obj.gridRes, MAX_GRID_RES); // Safety
 
@@ -497,22 +515,21 @@ function setGrid(obj)
   // grid[3] is reserved as offset for buffer update position
 
   const center = gridRes / 2;
-  
-  /*
-  const min = center - obj.area;
-  const max = center + obj.area;
-
-  for(let k=min; k<max; k++)
-    for(let j=min; j<max; j++)
-      for(let i=min; i<max; i++)
-        grid[4 + gridRes * gridRes * k + gridRes * j + i] = rand() > 0.7 ? 1 : 0;
-  */
  
+  // Noise
+  let d = obj.area / 2;
+  for(let k=center - d; k<center + d; k++)
+    for(let j=center - d; j<center + d; j++)
+      for(let i=center - d; i<center + d; i++)
+        grid[4 + gridRes * gridRes * k + gridRes * j + i] = rand() > 0.7 ? 1 : 0;
+
+  /*
   // Logo
-  for(let k=0; k<12; k++)
-    for(let j=0; j<10; j++)
-      for(let i=0; i<46; i++)
-        grid[4 + gridRes * gridRes * (center - 6 + k) + gridRes * (center - 5 + j) + (center - 23 + i)] = LOGO[46 * (9 - j) + i];
+  for(let k=0; k<10; k++)
+    for(let j=0; j<21; j++)
+      for(let i=0; i<25; i++)
+        grid[4 + gridRes * gridRes * (center - 5 + k) + gridRes * (center - 10 + j) + (center - 12 + i)] = LOGO[25 * (20 - j) + i];
+  */
 
   device.queue.writeBuffer(gridBuffer[0], 0, grid);
   device.queue.writeBuffer(gridBuffer[1], 0, grid);
@@ -523,16 +540,14 @@ function setGrid(obj)
 function setRules(obj)
 {
   if(obj.ruleSet !== undefined) {
-    activeRuleSet = (obj.ruleSet == -1) ? -activeRuleSet : obj.ruleSet; // -1 toggles current rules set between active/inactive
-    if(activeRuleSet > 0) {
-      let rulesBitsBigInt = RULES[activeRuleSet];
-      // State count (bit 0-3)
-      rules[0] = Number(rulesBitsBigInt & BigInt(0xf));
-      // Alive bits (4-31), birth bits (32-59)
-      for(let i=0; i<rules.length - 1; i++)
-        rules[1 + i] = Number((rulesBitsBigInt >> BigInt(4 + i)) & BigInt(0x1));
-      device.queue.writeBuffer(rulesBuffer, 0, rules);
-    }
+    activeRuleSet = obj.ruleSet; // Can be active (positive) or inactive (negative), zero is excluded by definition
+    let rulesBitsBigInt = RULES[Math.abs(activeRuleSet)];
+    // State count (bit 0-3)
+    rules[0] = Number(rulesBitsBigInt & BigInt(0xf));
+    // Alive bits (4-31), birth bits (32-59)
+    for(let i=0; i<rules.length - 1; i++)
+      rules[1 + i] = Number((rulesBitsBigInt >> BigInt(4 + i)) & BigInt(0x1));
+    device.queue.writeBuffer(rulesBuffer, 0, rules);
     recordRulesEvent(obj);
   }
 }
@@ -572,21 +587,26 @@ function recordCameraEvent(obj)
 {
   let optional = "";
 
+  if(obj.dir !== undefined)
+    optional += `, dirPhi: ${Math.atan2(obj.dir[1], obj.dir[0]).toFixed(4)}, dirTheta: ${Math.acos(obj.dir[2]).toFixed(4)}`;
+
   if(obj.moveEye !== undefined)
     optional += `, moveEyePhi: ${Math.atan2(obj.moveEye[1], obj.moveEye[0]).toFixed(4)}, moveEyeTheta: ${Math.acos(obj.moveEye[2]).toFixed(4)}`;
 
   if(obj.speed !== undefined)
     optional += `, speed: ${obj.speed}`;
 
-  console.log(`{ time: ${timeInBeats.toFixed(2)}, obj: { eye: [${obj.eye[0].toFixed(2)}, ${obj.eye[1].toFixed(2)}, ${obj.eye[2].toFixed(2)}], ` +
-    `dirPhi: ${Math.atan2(obj.dir[1], obj.dir[0]).toFixed(4)}, dirTheta: ${Math.acos(obj.dir[2]).toFixed(4)}${optional} } }, // CAMERA_EVENT`);
+  console.log(`{ time: ${timeInBeats.toFixed(2)}, obj: { eye: [${obj.eye[0].toFixed(2)}, ${obj.eye[1].toFixed(2)}, ${obj.eye[2].toFixed(2)}]${optional} } }, // CAMERA_EVENT`);
 }
 
 function completeCameras()
 {
   for(let i=0; i<CAMERA_EVENTS.length; i++) {
     let obj = CAMERA_EVENTS[i].obj;
-    CAMERA_EVENTS[i].obj.dir = vec3FromSpherical(obj.dirTheta, obj.dirPhi)
+    if(obj.dirTheta !== undefined)
+      CAMERA_EVENTS[i].obj.dir = vec3FromSpherical(obj.dirTheta, obj.dirPhi)
+    else
+      CAMERA_EVENTS[i].obj.center = true;
     CAMERA_EVENTS[i].obj.moveEye = obj.moveEyeTheta !== undefined ? vec3FromSpherical(obj.moveEyeTheta, obj.moveEyePhi) : [0, 0, 0];
     CAMERA_EVENTS[i].obj.speed = obj.speed !== undefined ? obj.speed : 1;
     CAMERA_EVENTS[i].obj.unsteady = obj.unsteady !== undefined ? obj.unsteady : 1;
@@ -708,7 +728,7 @@ async function handleKeyEvent(e)
       console.log("Recording mode " + (recording ? "enabled" : "disabled"));
       break;
     case " ":
-      // Global idle, intro time and simulation time are paused
+      // Global idle: Intro time and simulation time are paused
       idle = !idle;
       if(idle) {
         if(AUDIO)
@@ -717,7 +737,7 @@ async function handleKeyEvent(e)
         if(AUDIO)
           await playAudio();
       }
-      console.log("Idle mode " + (idle ? "enabled" : "disabled"));
+      console.log("Idle mode " + (idle ? "enabled" : "disabled") + ", time: " + timeInBeats);
       break;
     case "i":
       setGrid({ gridRes: MAX_GRID_RES, seed: seed, area: 4 });
@@ -730,11 +750,15 @@ async function handleKeyEvent(e)
         setTime({ delta: -0.25 });
       break;
     case "#":
-      setRules({ ruleSet: -1 }); // Toggle rule set, i.e. pause/run simulation
+      setRules({ ruleSet: -activeRuleSet }); // Enable or disable activity of current rule set (pos/neg)
       break;
     case ".":
-      // Records a STATIC cam
+      // Records a static cam with direction
       recordCameraEvent({ eye: eye, dir: dir }); 
+      break;
+    case ":":
+      // Records a static cam with center target
+      recordCameraEvent({ eye: eye });
       break;
     case "m":
       // Set start pose of moving cam
@@ -743,13 +767,22 @@ async function handleKeyEvent(e)
       break;
     case ",":
       if(cameraReference !== undefined) {
-        // Record start and end pose of moving cam
+        // Record start and end pose of moving cam with direction
         cameraReference.moveEye = vec3Normalize(vec3Add(eye, vec3Negate(cameraReference.eye)));
         recordCameraEvent(cameraReference);
         cameraReference = undefined;
       }
       break;
-    case ":":
+    case ";":
+      if(cameraReference !== undefined) {
+        // Record start and end pose of moving cam with center target
+        cameraReference.dir = undefined;
+        cameraReference.moveEye = vec3Normalize(vec3Add(eye, vec3Negate(cameraReference.eye)));
+        recordCameraEvent(cameraReference);
+        cameraReference = undefined;
+      }
+      break;
+    case "b":
       seed = undefined;
       console.log("Reset random seed");
       break;
@@ -772,7 +805,7 @@ async function handleKeyEvent(e)
       lastSimulationUpdateTime = 0;
       simulationIteration = 0;
       gridBufferUpdateOffset = 0;
-      activeRuleSet = -1;
+      activeRuleSet = 3;
       activeSimulationEventIndex = -1;
       activeCameraEventIndex = -1;
       if(AUDIO && !idle)
