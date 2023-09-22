@@ -1,4 +1,4 @@
-const FULLSCREEN = false;
+const FULLSCREEN = true;
 const AUDIO = true;
 const BPM = 120;
 
@@ -99,11 +99,11 @@ const RULES_NAMES = [
 ];
 
 const SIMULATION_EVENTS = [
-{ time: 0, obj: { ruleSet: 3, delta: -0.325, seed: 4079287172, gridRes: MAX_GRID_RES, area: 24 } },
-{ time: 40, obj: { ruleSet: 4, delta: 0.325 } },
-{ time: 60, obj: { ruleSet: 3 } },
+{ time: 0, obj: { ruleSet: 3, delta: -0.320, seed: 4079287172, gridRes: MAX_GRID_RES, area: 24 } },
+{ time: 40, obj: { ruleSet: 4, delta: 0.320 } },
+{ time: 60, obj: { ruleSet: 3, delta: 0.05 } },
 { time: 80, obj: { ruleSet: 1, delta: 0.125 } },
-{ time: 120, obj: { ruleSet: 8, delta: -0.125 } },
+{ time: 120, obj: { ruleSet: 8, delta: -0.130 } },
 { time: 180, obj: { ruleSet: -8 } },
 ];
 

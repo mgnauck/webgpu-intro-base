@@ -158,13 +158,20 @@ fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, invDir: vec3f, tmin: 
 fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, hit: ptr<function, Hit>) -> bool
 {
   let mulf = vec3f(grid.mul);
-  let stepDir = sign(invDir);
+  var stepDir = sign(invDir);
   var t = (vec3f(0.5) + 0.5 * stepDir - fract(ori)) * invDir;
-  var mask: vec3f;
+  var mask = vec3f(0);
 
+  (*hit).dist = 0.0;
   (*hit).index = i32(dot(mulf, floor(vec3f(mulf.y * 0.5) + ori)));
-
+  
   loop {
+    (*hit).state = grid.arr[(*hit).index];
+    if((*hit).state > 0) {
+      (*hit).norm = mask * -stepDir;
+      return true;
+    }
+
     (*hit).dist = minComp(t);
     if((*hit).dist >= tmax) {
       return false;
@@ -176,18 +183,11 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, hit: ptr<function, Hit>) -
 
     t += mask * stepDir * invDir;
     (*hit).index += i32(dot(mulf, mask * stepDir));
- 
-    (*hit).state = grid.arr[(*hit).index];
-    if((*hit).state > 0) {
-      (*hit).norm = mask * -stepDir;
-      return true;
-    }
   }
 }
 
 fn calcOcclusion(pos: vec3f, index: i32, norm: vec3i) -> f32
 {
-  // TODO Handle out of grid cells with state 0?
   let above = index + dot(grid.mul, norm);
   let dir = abs(norm);
   let hori = dot(grid.mul, dir.yzx);
@@ -248,7 +248,7 @@ fn trace(ori: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> bool
   let halfGrid = vec3f(f32(grid.mul.y / 2));
 
   if(intersectAabb(-halfGrid, halfGrid, ori, invDir, &tmin, &tmax)) {
-    tmin = max(tmin - EPSILON, 0.0);
+    tmin = max(tmin + EPSILON, 0.0);
     (*hit).maxDist = tmax - EPSILON - tmin;
     if(traverseGrid(ori + tmin * dir, invDir, (*hit).maxDist, hit)) {
       (*hit).pos = ori + (tmin + (*hit).dist) * dir;
