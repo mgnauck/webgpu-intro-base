@@ -18,10 +18,8 @@ const FOV = 50.0;
 const AUDIO_BUFFER_SIZE = 4096 * 4096;
 
 const MAX_GRID_RES = 256;
-const SIMULATION_UPDATE_STEPS = 1;
+const SIMULATION_UPDATE_STEPS = 4;
 const DEFAULT_UPDATE_DELAY = 0.5;
-const GLOBAL_CAM_SPEED = 100;
-const GLOBAL_CAM_UNSTEADY = 2.0;
 
 const MOVE_VELOCITY = 0.75;
 const LOOK_VELOCITY = 0.025;
@@ -101,11 +99,11 @@ const RULES_NAMES = [
 ];
 
 const SIMULATION_EVENTS = [
-{ time: 0, obj: { ruleSet: 3, delta: -0.375, seed: 4079287172, gridRes: MAX_GRID_RES, area: 24 } },
-{ time: 40, obj: { ruleSet: 4, delta: 0.375 } },
+{ time: 0, obj: { ruleSet: 3, delta: -0.325, seed: 4079287172, gridRes: MAX_GRID_RES, area: 24 } },
+{ time: 40, obj: { ruleSet: 4, delta: 0.325 } },
 { time: 60, obj: { ruleSet: 3 } },
-{ time: 80, obj: { ruleSet: 1 } },
-{ time: 120, obj: { ruleSet: 8 } },
+{ time: 80, obj: { ruleSet: 1, delta: 0.125 } },
+{ time: 120, obj: { ruleSet: 8, delta: -0.125 } },
 { time: 180, obj: { ruleSet: -8 } },
 ];
 
@@ -113,9 +111,9 @@ const CAMERA_EVENTS = [
 { time: 0, obj: [ 42, 1.5708, 0.0000 ] },
 { time: 40, obj: [ 320, -3.7292, 0.7250 ] },
 { time: 60, obj: [ 240, -4.4042, -0.7000 ] },
-{ time: 80, obj: [ 210, -5.7792, 0.8000 ] },
-{ time: 120, obj: [ 180, -2.7960, -0.7000 ] },
-{ time: 180, obj: [ 250, -1.9600, 0.5000] },
+{ time: 80, obj: [ 200, -5.7792, 0.8000 ] },
+{ time: 120, obj: [ 170, -2.7960, -0.7000 ] },
+{ time: 180, obj: [ 220, -1.3600, 0.5000] },
 ];
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
@@ -252,9 +250,6 @@ async function renderAudio()
   let shaderCode = await loadTextFile(AUDIO_SHADER_FILE);
   let shaderModule = device.createShaderModule({code: shaderCode});
 
-  const shaderInfo = await shaderModule.getCompilationInfo();
-  shaderInfo.messages.forEach((m) => console.log(`${m.type} (${m.lineNum}): ${m.message}`)); 
-
   let pipeline = await createComputePipeline(shaderModule, audioPipelineLayout, "audioMain");
 
   let commandEncoder = device.createCommandEncoder();
@@ -269,8 +264,8 @@ async function renderAudio()
   await audioReadBuffer.mapAsync(GPUMapMode.READ);
   let audioData = new Float32Array(audioReadBuffer.getMappedRange());
 
-  let channel0 = webAudioBuffer.getChannelData(0); // right
-  let channel1 = webAudioBuffer.getChannelData(1); // left
+  let channel0 = webAudioBuffer.getChannelData(0);
+  let channel1 = webAudioBuffer.getChannelData(1);
 
   for(let i=0; i<AUDIO_BUFFER_SIZE; i++) {
     channel0[i] = audioData[(i << 1) + 0];
@@ -279,9 +274,7 @@ async function renderAudio()
 
   audioReadBuffer.unmap();
 
-  const renderDuration = performance.now() - renderStartTime;
-
-  console.log("Rendered audio, duration: " + renderDuration.toFixed(2) + " ms");
+  console.log("Rendered audio, duration: " + (performance.now() - renderStartTime).toFixed(2) + " ms");
 }
 
 async function suspendAudio()
@@ -422,7 +415,7 @@ function render(time)
       if(gridBufferUpdateOffset >= gridRes) {
         simulationIteration++;
         gridBufferUpdateOffset = 0;
-        lastSimulationUpdateTime = timeInBeats;
+        lastSimulationUpdateTime = ((AUDIO ? audioContext.currentTime : time / 1000.0) - startTime) * BPM / 60;
       } else {
         console.log("Simulation update not finished within time budget.");
       }
@@ -584,14 +577,13 @@ function recordTimeEvent(obj)
 
 function recordCameraEvent(obj)
 {
-  console.log(`{ time: ${timeInBeats.toFixed(2)}, obj: [ ${obj[0].toFixed(2)}, ${obj[1].toFixed(4)}, ${obj[2].toFixed(4)} ] },`);
+  console.log(`{ time: ${timeInBeats.toFixed(2)}, obj: [ ${obj[0].toFixed(1)}, ${obj[1].toFixed(4)}, ${obj[2].toFixed(4)} ] },`);
 }
 
 async function handleKeyEvent(e)
 {    
   // Rule sets 1-10 (keys 0-9)
-  if(e.key != " " && !isNaN(e.key))
-  {
+  if(e.key != " " && !isNaN(e.key)) {
     setRules({ ruleSet: parseInt(e.key, 10) + 1 });
     return;
   }
@@ -707,7 +699,7 @@ async function startRender()
   }
 
   updateSimulation();
-  resetView();
+  resetView(); // In case we have no camera, i.e. when recording
   updateCamera();
 
   document.querySelector("button").removeEventListener("click", startRender);

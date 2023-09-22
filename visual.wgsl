@@ -37,9 +37,6 @@ struct Hit
 const WIDTH = 1024;
 const HEIGHT = WIDTH / 1.6;
 const EPSILON = 0.001;
-const PI = 3.141;
-const TWO_PI = PI * 2.0;
-
 
 // TODO Edit! For now these values just align the brightness due to changing state count.
 const ruleSetTints = array<vec3f, 11>(
@@ -165,7 +162,6 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, hit: ptr<function, Hit>) -
   var t = (vec3f(0.5) + 0.5 * stepDir - fract(ori)) * invDir;
   var mask: vec3f;
 
-  // Assumes grid is centered at 0/0/0
   (*hit).index = i32(dot(mulf, floor(vec3f(mulf.y * 0.5) + ori)));
 
   loop {
@@ -191,7 +187,7 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, hit: ptr<function, Hit>) -
 
 fn calcOcclusion(pos: vec3f, index: i32, norm: vec3i) -> f32
 {
-  // TODO Set out of grid cells to state 0?
+  // TODO Handle out of grid cells with state 0?
   let above = index + dot(grid.mul, norm);
   let dir = abs(norm);
   let hori = dot(grid.mul, dir.yzx);
