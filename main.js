@@ -1,5 +1,5 @@
-const FULLSCREEN = true;
-const AUDIO = true;
+const FULLSCREEN = false;
+const AUDIO = true; // AudioContext has the best timer, so better leave it enabled.
 const BPM = 120;
 
 const DISABLE_RENDERING = false;
@@ -11,7 +11,7 @@ const RECORDING = false;
 const STOP_REPLAY_AT = 180;
 
 const ASPECT = 1.6;
-const CANVAS_WIDTH = 1024;
+const CANVAS_WIDTH = 1024; // Careful, this is also hardcoded in the shader!!
 const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 const FOV = 50.0;
 
@@ -417,7 +417,7 @@ function render(time)
         gridBufferUpdateOffset = 0;
         lastSimulationUpdateTime = ((AUDIO ? audioContext.currentTime : time / 1000.0) - startTime) * BPM / 60;
       } else {
-        console.log("Simulation update not finished within time budget.");
+        console.log("WARNING: Simulation update not finished within time budget.");
       }
     }
   } else {
@@ -483,7 +483,7 @@ function updateCamera()
     radius = vals[0];
     phi = vals[1];
     theta = vals[2];
-    // TODO Apply unsteady cam
+    // TODO Apply unsteady cam again
   }
 }
 
