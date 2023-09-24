@@ -386,9 +386,7 @@ function render(time)
   } else
     lastSimulationUpdateTime = timeInBeats;
 
-  device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
-    ...view, timeInBeats //, Math.abs(activeRuleSet) - 1
-  ]));
+  device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([...view, timeInBeats]));
 
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
   encodeRenderPassAndSubmit(commandEncoder, renderPassDescriptor, renderPipeline, bindGroup[simulationIteration % 2]);
@@ -682,30 +680,6 @@ async function main()
   
   // State count + alive rules + birth rules
   rules = new Uint32Array(1 + 2 * 27);
-
-  /*
-  // Title buffer
-  const offCanvas = new OffscreenCanvas(512, 256);
-  const offContext = offCanvas.getContext("2d");
-  offContext.font = "128px serif";
-  offContext.fillStyle = "black";
-  offContext.fillRect(0, 0, 512, 256);
-  offContext.fillStyle = "white";
-  offContext.rect(90, 127, 320, 2);
-  offContext.fill();
-  offContext.fillText("unik", 134, 116);
-  offContext.translate(0, 256);
-  offContext.scale(1, -1);
-  offContext.fillText("elusive", 70, 114);
-  */
-
-  /*offCanvas.convertToBlob().then((blob) => {
-    var blobUrl = URL.createObjectURL(blob);
-    window.location.replace(blobUrl);
-  });*/
-
-  //const imageData = offContext.getImageData(0, 0, 256, 256);
-  // imageData.data --> Uint8ClampedArray
 
   await createRenderResources();
   await createPipelines();

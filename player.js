@@ -277,9 +277,7 @@ function render(time)
   } else
     lastSimulationUpdateTime = timeInBeats;
 
-  device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
-    ...view, timeInBeats //, Math.abs(activeRuleSet) - 1
-  ]));
+  device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([...view, timeInBeats]));
 
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
   encodeRenderPassAndSubmit(commandEncoder, renderPassDescriptor, renderPipeline, bindGroup[simulationIteration % 2]);
