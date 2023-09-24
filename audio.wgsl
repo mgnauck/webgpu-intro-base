@@ -61,7 +61,7 @@ fn hihat(time: f32, freq: f32) -> f32
   let dist = 0.75;
   let out = noise(time * freq).x;
   let env = exp(-90.0 * time);
-  let hihat = atan2(out, 1.0-dist);
+  let hihat = atan2(out, 1.0 - dist);
   return hihat * env; 
 }
 
