@@ -88,6 +88,30 @@ const PI = 3.141592654;
 const TAU = 6.283185307;
 const TIME_PER_BEAT = 60.0 / BPM / 4.0;
 const TIME_PER_PATTERN = 60.0 / BPM * 4.0;
+const PATTERN_COUNT = 6;
+const PATTERN_ROW_COUNT = 16;
+const KICK = 0;
+const HIHAT = 1;
+const BASS = 2;
+const DURCH = 3;
+
+struct Note 
+{
+  note: i32,
+  instr: i32,
+  amp: f32
+}
+
+struct Row 
+{
+  note1: Note,
+  note2: Note,
+  note3: Note,
+  note4: Note
+}
+
+const NoteOff = Note(-1, -1, 0.0);
+const RowOff = Row(NoteOff, NoteOff, NoteOff, NoteOff);
 
 // Suboptimal random (ripped from somewhere)
 fn rand(co: vec2f) -> f32
@@ -108,42 +132,44 @@ fn adsr(time: f32, att: f32, dec: f32, sus: f32, susL: f32, rel : f32) -> f32
   return 
     max(  0.0,
           min( 
-            time / att, 
+            smoothstep(0.0, 1.0, time / att),
             max( 
               susL, 
-              1.0 - (time - att) * (1.0 - susL) / dec) *
+              smoothstep(0.0, 1.0, 1.0 - (time - att) * (1.0 - susL) / dec)) *
               min(1.0, 1.0 - max(0.0, (time - att - dec - sus) / rel)
             )
           )
     );
 }
 
+//////////////////////// INSTRUMENTS 
+
 fn bass(time: f32, freq: f32) -> f32
 {
-  let dist = 1.0 + 0.20 * sin(time * TAU * 5.0);
-  let phase = freq * time + 5.0 * sin(time*TAU*1.0); 
-  let env = exp(-4 * time);
-  let bass = atan2(sin(TAU * phase), dist);
+  let phase = freq * time; 
+  let env = exp(-3.0 * time);
+  let bass = atan2( sin(TAU * phase), 1.0-0.25);
 
   return bass * env;
 }
 
 fn hihat(time: f32, freq: f32) -> f32
 {
-  let dist = 1.0 + 0.5 * sin(time * TAU * 3.0);
-  let env = exp(-20.0 * time);
-  let hihat = atan2( noise(time * freq).x, dist);
+  let dist = 0.75;
+  let out = noise(time * freq).x;
+  let env = exp(-90.0 * time);
+  let hihat = atan2(out, 1.0-dist);
   return hihat * env; 
 }
 
 // inspired by:
-// https://www.shadertoy.com/view/7ljczz
+// https://www.shadertoy.com/view/7lpatternIndexczz
 fn kick(time: f32, freq: f32) -> f32
 {
-  let dist = 1.0 + 0.5 * sin(time * TAU * 50.0);
-  let phase = freq * time - 8.0 * exp( -20.0 * time ) - 3.0 * exp( -600.0 * time );
-  let env = exp( -5.0 * time );
-  let kick = atan2( sin(TAU * phase), dist);
+  let dist = 0.65;
+  let phase = freq * time - 8.0 * exp(-20.0 * time) - 3.0 * exp(-800.0 * time);
+  let env = exp(-4.0 * time);
+  let kick = atan2(sin(TAU * phase), 1.0 - dist);
 
   return kick * env;
 }
@@ -157,64 +183,132 @@ fn clap(time: f32, freq : f32) -> f32
   return clap * env;
 }
 
-// TBD relevant note constants below
-const D4 = 62;
-const B3 = 39;
-const A3 = 37;
-const G3 = 35;
-const FIS3 = 34;
-const F3 = 33;
-const FIS1 = 30;
-const E1 = 28;
-const A2 = 25;
-const FIS2 = 22;
-const DIS1 = 27;
-const D1 = 26;
-const F1 = 9;
-const NONE = -1;
+fn simple(time: f32, freq: f32) -> f32
+{
+  let lfo = 0.25 * sin(TAU * time * 0.01);
+  let phase = time * (freq + lfo);
+  let phase2 = time * freq;
+  let env = exp(-2.0 * time);
+  let o1 = sin(TAU * phase);
+  let o2 = 2 * (fract(phase) - 0.5);
+
+  return o1 * o2 * env;
+}
+
+fn simple2(time: f32, freq: f32) -> f32
+{
+  let c = 0.2;
+  let r = 0.3;
+  
+  var v0 = 0.0;
+  var v1 = 0.0;
+  const cnt = 12;
+  for(var i=0;i<cnt;i++)
+  {
+    let last = f32(cnt-i)*(1.0/f32(params.sampleRate));
+    let t = time - last;
+    let inp = simple(t, freq);
+    v0 = (1.0-r*c)*v0  -  (c)*v1  + (c)*inp;
+    v1 = (1.0-r*c)*v1  +  (c)*v0;
+  }
+
+  return v1;
+}
 
 // convert a note to it's frequency representation
 fn noteToFreq(note: f32) -> f32
 {
-  return 440.0 * pow(2.0, (f32(note) - 69.0) / 12.0);
+  return 440.0 * pow(2.0, (note - 69.0) / 12.0);
 }
 
-// Workaround to support euclidean modulo (glsl)
-// https://github.com/gpuweb/gpuweb/issues/3987#issuecomment-1528783750
-fn modulo_euclidean(a: f32, b: f32) -> f32 
-{
-	let m = a % b;
-  return select(m, m + abs(b), m < 0.0);
-}
-
-const KICK_CHANNEL = 0;
-const HIHAT_CHANNEL = 1;
-const BASS_CHANNEL = 2;
-const CLAP_CHANNEL = 3;
-const CHANNELS = 4;
-const ROWS = 16;
-const PATTERN = array<array<f32,CHANNELS>, ROWS>
+const PATTERN_1 = array<Row, PATTERN_ROW_COUNT>
 ( 
-  array<f32,CHANNELS>( FIS1,   D4, NONE,   33 ), 
-  array<f32,CHANNELS>( NONE, NONE, NONE, NONE ), 
-  array<f32,CHANNELS>( NONE,   D4,   33, NONE ), 
-  array<f32,CHANNELS>( NONE, NONE, NONE, NONE ), 
-
-  array<f32,CHANNELS>( FIS1,   D4, NONE, NONE ), 
-  array<f32,CHANNELS>( NONE, NONE, NONE, NONE ), 
-  array<f32,CHANNELS>( NONE,   D4,   33, NONE ), 
-  array<f32,CHANNELS>( NONE, NONE, NONE, NONE ), 
-
-  array<f32,CHANNELS>( FIS1,   D4, NONE, NONE ), 
-  array<f32,CHANNELS>( NONE, NONE, NONE, NONE ), 
-  array<f32,CHANNELS>( NONE,   D4, NONE, NONE ), 
-  array<f32,CHANNELS>( NONE, NONE, NONE, NONE ), 
-
-  array<f32,CHANNELS>( FIS1,   D4,   33, NONE ), 
-  array<f32,CHANNELS>( NONE, NONE, NONE, NONE ), 
-  array<f32,CHANNELS>( NONE,   D4,   36, NONE ), 
-  array<f32,CHANNELS>( FIS1,   D4, NONE, NONE ), 
+  Row(Note(33,KICK,0.5), Note(33,HIHAT,0.25), Note(33,DURCH,0.15), NoteOff),
+  RowOff, 
+  Row(NoteOff, Note(33,HIHAT,0.15), Note(33+12,DURCH,0.20), Note(33,BASS,0.20)),
+  RowOff,
+  Row(NoteOff, Note(33,HIHAT,0.25), Note(33+24,DURCH,0.25), Note(33,BASS,0.20)),
+  RowOff, 
+  Row(Note(33,KICK,0.3), Note(33,HIHAT,0.15), NoteOff, Note(33,BASS,0.10)),
+  RowOff,
+  Row(NoteOff, Note(33,HIHAT,0.25), NoteOff, NoteOff),
+  RowOff, 
+  Row(NoteOff, Note(33,HIHAT,0.15), Note(33+24,DURCH,0.1), Note(33,BASS,0.20)),
+  RowOff,
+  Row(Note(33,KICK,0.4), Note(33,HIHAT,0.25), NoteOff, Note(33,BASS,0.20)),
+  RowOff, 
+  Row(NoteOff, Note(33,HIHAT,0.15), Note(33+24,DURCH,0.02), Note(33,BASS,0.20)),
+  Row(NoteOff, Note(33,HIHAT,0.05), NoteOff, NoteOff),
 );
+
+const PATTERN_2 = array<Row, PATTERN_ROW_COUNT>
+( 
+  Row(Note(33,KICK,0.5), Note(33,HIHAT,0.25), Note(33,BASS,0.20), NoteOff),
+  RowOff, 
+  Row(NoteOff, Note(33,HIHAT,0.15), NoteOff, NoteOff),
+  RowOff,
+  Row(NoteOff, Note(33,HIHAT,0.25), NoteOff, NoteOff),
+  RowOff, 
+  Row(Note(33,KICK,0.4), Note(33,HIHAT,0.15), Note(33,BASS,0.20), NoteOff),
+  RowOff,
+  Row(NoteOff, Note(33,HIHAT,0.25), NoteOff, NoteOff),
+  RowOff, 
+  Row(NoteOff, Note(33,HIHAT,0.15), Note(33+36-7,DURCH,0.2), NoteOff),
+  Row(NoteOff, NoteOff, Note(33+36-7-7,DURCH,0.1), NoteOff),
+  Row(Note(33,KICK,0.4), Note(33,HIHAT,0.25), Note(33+24,DURCH,0.2), Note(33+12,BASS,0.20)),
+  RowOff, 
+  Row(NoteOff, Note(33,HIHAT,0.15), Note(33,DURCH,0.1), NoteOff),
+  Row(NoteOff, Note(33,HIHAT,0.05), NoteOff, NoteOff),
+);
+
+const PATTERNS = array<array<Row, PATTERN_ROW_COUNT>, PATTERN_COUNT> 
+( 
+  PATTERN_1,
+  PATTERN_2,
+  PATTERN_1,
+  PATTERN_2,
+  PATTERN_1,
+  PATTERN_2,
+);
+
+fn sine(time: f32, freq: f32) -> f32
+{
+  return sin(time * TAU * freq);
+}
+
+fn pling(time: f32, freq: f32) -> f32
+{
+  return sin(time * TAU * freq) * exp(-1.0*time);
+}
+
+fn sqr(time: f32, freq: f32) -> f32
+{
+  return (1.0 - 0.5) * 2.0 * atan(sin(time*freq) / 0.5) / PI;
+}
+
+fn sample1(time: f32, freq: f32) -> f32
+{
+  let lfo = sin(time * TAU * 0.1) * 1.0;
+  let lfo2 = 0.5; // 1.0 + 0.5 * sin(time * TAU * 1) * 0.1;
+
+  let voices = 13.0;
+  var out = 0.0;
+  for(var v=1.0;v<=voices;v+=1.0)
+  {
+    let detune = sin((time + v) * TAU * 0.25) * 0.25;
+    out += 1.0/voices * sine(time, (freq+detune+lfo)*v);
+  }
+
+  out = atan2(out, 1.0-lfo2);
+  let env = exp(-3.0*time);
+
+  return out * env;
+}
+
+fn sample2(time: f32, freq: f32) -> f32
+{
+  return sample1(time, freq);
+}
 
 @group(0) @binding(0) var<uniform> params: AudioParameters;
 @group(0) @binding(1) var<storage, read_write> buffer: array<vec2f>;
@@ -230,46 +324,54 @@ fn audioMain(@builtin(global_invocation_id) globalId: vec3u)
   // Calculate current sample from given buffer id
   let sample = dot(globalId, vec3u(1, params.bufferDim, params.bufferDim * params.bufferDim));
   let time = f32(sample) / f32(params.sampleRate);
+  let musicTime = time % (TIME_PER_PATTERN * PATTERN_COUNT);
 
   // Samples are calculated in mono and then written to left/right
   var output = vec2(0.0);
-
-  for(var i=0; i<ROWS; i++)
+/*
+  for(var patternIndex=0; patternIndex<PATTERN_COUNT; patternIndex++)
   {
-    let beatTime = f32(i) * TIME_PER_BEAT;
-    let noteTime = modulo_euclidean(time - beatTime, TIME_PER_PATTERN);
-    let currentRow = PATTERN[i];
+    let pattern = PATTERNS[patternIndex];
 
-    // kick
-    let kickNote = currentRow[KICK_CHANNEL];
-    //let kickNoteNext = PATTERN[(i+1)%ROWS][KICK_CHANNEL];
-    let kickNoteFreq = noteToFreq(kickNote);
-    let kickNoteOn = 1.0 * sign(kickNote + 1.0);
-
-    if(time > TIME_PER_PATTERN * 1)
+    for(var rowIndex=0; rowIndex<PATTERN_ROW_COUNT; rowIndex++)
     {
-      output += vec2f(0.30 * kick(noteTime, kickNoteFreq) * kickNoteOn);
+      let patternTime = f32(patternIndex) * TIME_PER_PATTERN + f32(rowIndex) * TIME_PER_BEAT;
+      let noteTime = musicTime - patternTime;
+      let row = pattern[rowIndex];
+      let notes = array<Note, 1>(row.note1, row.note2, row.note3, row.note4);
+
+      for(var noteIndex=0; noteIndex<4; noteIndex++)
+      {
+        let note = notes[noteIndex];
+
+        if(note.note > -1 && note.instr > -1 && noteTime > 0.0)
+        {
+          let noteFreq = noteToFreq(f32(note.note));
+          var instrOutput = 0.0;
+
+          if(note.instr == KICK)
+          { 
+            instrOutput = kick(noteTime, noteFreq);
+          }
+          else if(note.instr == HIHAT)
+          {
+            instrOutput = hihat(noteTime, noteFreq);
+          }
+          else if(note.instr == BASS)
+          {
+            instrOutput = bass(noteTime, noteFreq);
+          }
+          else if(note.instr == DURCH)
+          {
+            instrOutput = sample1(noteTime, noteFreq);
+          }
+
+          output += instrOutput * note.amp;
+        }
+      }
     }
-
-    // hihat
-    let hihatNote = currentRow[HIHAT_CHANNEL];
-    let hihatNoteFreq = noteToFreq(hihatNote);
-    let hihatNoteOn = sign(hihatNote + 1.0);
-    output += vec2f(0.05 * hihat(noteTime, hihatNoteFreq) * hihatNoteOn);
-
-    // bass
-    let bassNote = currentRow[BASS_CHANNEL];
-    let bassNoteFreq = noteToFreq(bassNote);
-    let bassNoteOn = sign(bassNote + 1.0);
-    output += vec2f(0.4 * bass(noteTime, bassNoteFreq) * bassNoteOn);
-
-    // clap
-    //let clapNote = PATTERN[i][CLAP_CHANNEL];
-    //let clapNoteFreq = noteToFreq(clapNote);
-    //let clapNoteOn = sign(clapNote+1.0);
-    //output += vec2f(0.3 * clap(noteTime, clapNoteFreq) * clapNoteOn);
   }
-
+*/
   // Write 2 floats between -1 and 1 to output buffer (stereo)
   buffer[sample] = clamp(output, vec2f(-1), vec2f(1));
 }
@@ -278,20 +380,16 @@ fn audioMain(@builtin(global_invocation_id) globalId: vec3u)
 const VISUAL_SHADER = `
 struct Uniforms
 {
-  right: vec3f,
-  tanHalfFov: f32,
-  up: vec3f,
+  radius: f32,
+  phi: f32,
+  theta: f32,
   time: f32,
-  forward: vec3f,
-  ruleSet: f32,
-  eye: vec3f,
-  freeValue2: f32
+  //ruleSet: f32
 }
 
 struct Grid
 {
   mul: vec3i,
-  zOfs: u32,
   arr: array<u32>
 }
 
@@ -398,12 +496,7 @@ fn evalState(pos: vec3i, states: u32)
 @compute @workgroup_size(4,4,4)
 fn computeMain(@builtin(global_invocation_id) globalId: vec3u)
 {
-  var pos = vec3i(i32(globalId.x), i32(globalId.y), i32(globalId.z + grid.zOfs));
-  if(pos.z >= grid.mul.y) {
-    return;
-  }
-
-  evalState(pos, rules.states);
+  evalState(vec3i(globalId), rules.states);
 }
 
 fn minComp(v: vec3f) -> f32
@@ -505,7 +598,7 @@ fn shade(pos: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> vec3f
 
   let val = f32(rules.states) / f32(min((*hit).state, rules.states));
   let sky = 0.4 + (*hit).norm.y * 0.6;
-  let col = vec3f(0.005) + ruleSetTints[u32(uniforms.ruleSet)] * (vec3f(0.5) + pos / f32(grid.mul.y)) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
+  let col = vec3f(0.005) + /*ruleSetTints[u32(uniforms.ruleSet)] * */(vec3f(0.5) + pos / f32(grid.mul.y)) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
   let occ = calcOcclusion(pos, (*hit).index, vec3i((*hit).norm));
 
   return col * occ * occ * occ;
@@ -561,10 +654,19 @@ fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec
 @fragment
 fn fragmentMain(@builtin(position) position: vec4f) -> @location(0) vec4f
 {
-  // Framebuffer y-down in webgpu
-  let dirEyeSpace = normalize(vec3f((position.xy - vec2f(WIDTH, HEIGHT) * 0.5) / f32(HEIGHT), uniforms.tanHalfFov));
-  var dir = uniforms.right * dirEyeSpace.x - uniforms.up * dirEyeSpace.y + uniforms.forward * dirEyeSpace.z;
-  var ori = uniforms.eye;
+  // Camera
+  let FOV = 50.0;
+  let tanHalfFov = 0.5 / tan(0.5 * radians(FOV));
+  
+  let dirEyeSpace = normalize(vec3f((position.xy - vec2f(WIDTH, HEIGHT) * 0.5) / f32(HEIGHT), tanHalfFov));
+
+  let ori = vec3f(uniforms.radius * cos(uniforms.theta) * cos(uniforms.phi), uniforms.radius * sin(uniforms.theta), uniforms.radius * cos(uniforms.theta) * sin(uniforms.phi));
+
+  let fwd = normalize(-ori);
+  let ri = normalize(cross(fwd, vec3f(0, 1, 0)));
+  let up = cross(ri, fwd);
+
+  var dir = ri * dirEyeSpace.x - up * dirEyeSpace.y + fwd * dirEyeSpace.z;
 
   var col = vec3f(0.0);
   var hit: Hit;
@@ -635,17 +737,6 @@ function vec3Negate(v)
 function vec3Scale(v, s)
 {
   return [v[0] * s, v[1] * s, v[2] * s];
-}
-
-function vec3Cross(a, b)
-{
-  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-}
-
-function vec3Normalize(v)
-{
-  let invLen = 1.0 / Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-  return [v[0] * invLen, v[1] * invLen, v[2] * invLen];
 }
 
 async function createComputePipeline(shaderModule, pipelineLayout, entryPoint)
@@ -833,27 +924,18 @@ function render(time)
   updateSimulation();
   updateCamera();
  
-  if(!idle && activeRuleSet > 0) {
+  if(activeRuleSet > 0) {
     if(timeInBeats - lastSimulationUpdateTime > updateDelay) {
       const count = Math.ceil(gridRes / 4);
       encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], count, count, count); 
       simulationIteration++;
-      lastSimulationUpdateTime = ((AUDIO ? audioContext.currentTime : time / 1000.0) - startTime) * BPM / 60;
+      lastSimulationUpdateTime = (audioContext.currentTime - startTime) * BPM / 60;
     }
-  } else {
+  } else
     lastSimulationUpdateTime = timeInBeats;
-  }
 
-  let view = calcView();
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
-    ...view.right,
-    0.5 / Math.tan(0.5 * FOV * Math.PI / 180.0),
-    ...view.up,
-    timeInBeats,
-    ...view.dir,
-    Math.abs(activeRuleSet) - 1,
-    ...view.eye,
-    1.0 // free value
+    radius, phi, theta, timeInBeats //, Math.abs(activeRuleSet) - 1
   ]));
 
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
@@ -904,23 +986,6 @@ function updateCamera()
     theta = vals[2];
     // TODO Apply unsteady cam again
   }
-}
-
-function calcView()
-{
-  // TODO If we calc this in the shader (on every fragment), then we can throw out all vector math in the JS
-  let e = [radius * Math.cos(theta) * Math.cos(phi), radius * Math.sin(theta), radius * Math.cos(theta) * Math.sin(phi)];
-  let d = vec3Normalize(vec3Negate(e));
-  let r = vec3Normalize(vec3Cross(d, [0, 1, 0]));  
-  return { eye: e, dir: d, right: r, up: vec3Cross(r, d) };
-}
-
-// TODO Can go!
-function resetView()
-{
-  radius = gridRes * 0.5;
-  phi = Math.PI * 0.5;
-  theta = 0;
 }
 
 // TODO This will likely be thrown out completely (we just need to initially create the grid)
@@ -989,7 +1054,6 @@ function startRender()
   }
 
   updateSimulation();
-  resetView();
   updateCamera();
 
   requestAnimationFrame(render);

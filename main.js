@@ -145,17 +145,6 @@ function vec3Scale(v, s)
   return [v[0] * s, v[1] * s, v[2] * s];
 }
 
-function vec3Cross(a, b)
-{
-  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-}
-
-function vec3Normalize(v)
-{
-  let invLen = 1.0 / Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-  return [v[0] * invLen, v[1] * invLen, v[2] * invLen];
-}
-
 async function createComputePipeline(shaderModule, pipelineLayout, entryPoint)
 {
   return device.createComputePipelineAsync({
@@ -409,23 +398,11 @@ function render(time)
       simulationIteration++;
       lastSimulationUpdateTime = ((AUDIO ? audioContext.currentTime : time / 1000.0) - startTime) * BPM / 60;
     }
-  } else {
+  } else
     lastSimulationUpdateTime = timeInBeats;
-  }
 
-  //let view = calcView();
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
     radius, phi, theta, timeInBeats //, Math.abs(activeRuleSet) - 1
-    /*
-    ...view.right,
-    0.5 / Math.tan(0.5 * FOV * Math.PI / 180.0), // Not required anymore
-    ...view.up,
-    timeInBeats,
-    ...view.dir,
-    Math.abs(activeRuleSet) - 1,
-    ...view.eye,
-    1.0 // free value
-    */
   ]));
 
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
@@ -482,15 +459,7 @@ function updateCamera()
     // TODO Apply unsteady cam again?
   }
 }
-/*
-function calcView()
-{
-  let e = [radius * Math.cos(theta) * Math.cos(phi), radius * Math.sin(theta), radius * Math.cos(theta) * Math.sin(phi)];
-  let d = vec3Normalize(vec3Negate(e));
-  let r = vec3Normalize(vec3Cross(d, [0, 1, 0]));  
-  return { eye: e, dir: d, right: r, up: vec3Cross(r, d) };
-}
-*/
+
 function resetView()
 {
   radius = gridRes * 0.5;

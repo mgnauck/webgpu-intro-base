@@ -5,15 +5,6 @@ struct Uniforms
   theta: f32,
   time: f32,
   //ruleSet: f32
-
-  /*right: vec3f,
-  tanHalfFov: f32,
-  up: vec3f,
-  time: f32,
-  forward: vec3f,
-  ruleSet: f32,
-  eye: vec3f,
-  freeValue2: f32*/
 }
 
 struct Grid
