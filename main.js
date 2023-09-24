@@ -48,7 +48,7 @@ let renderPassDescriptor;
 let canvas;
 let context;
 
-let radius, phi, theta;
+let view = []; // radius, phi, theta
 let programmableValue;
 
 let seed;
@@ -128,21 +128,6 @@ function splitmix32(a) {
 function loadTextFile(url)
 {
   return fetch(url).then(response => response.text());
-}
-
-function vec3Add(a, b)
-{
-  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
-}
-
-function vec3Negate(v)
-{
-  return [-v[0], -v[1], -v[2]];
-}
-
-function vec3Scale(v, s)
-{
-  return [v[0] * s, v[1] * s, v[2] * s];
 }
 
 async function createComputePipeline(shaderModule, pipelineLayout, entryPoint)
@@ -402,7 +387,7 @@ function render(time)
     lastSimulationUpdateTime = timeInBeats;
 
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
-    radius, phi, theta, timeInBeats //, Math.abs(activeRuleSet) - 1
+    ...view, timeInBeats //, Math.abs(activeRuleSet) - 1
   ]));
 
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
@@ -441,30 +426,18 @@ function updateCamera()
   if(activeCameraEventIndex + 1 < CAMERA_EVENTS.length && timeInBeats >= CAMERA_EVENTS[activeCameraEventIndex + 1].time)
     recordCameraEvent(CAMERA_EVENTS[++activeCameraEventIndex].obj);
 
-  if(activeCameraEventIndex >= 0) {
+  if(activeCameraEventIndex >= 0 && activeCameraEventIndex + 1 < CAMERA_EVENTS.length) {
     let curr = CAMERA_EVENTS[activeCameraEventIndex];
-    let vals = curr.obj;
-    if(activeCameraEventIndex + 1 < CAMERA_EVENTS.length) {
-      let next = CAMERA_EVENTS[activeCameraEventIndex + 1];
-      let t = (timeInBeats - curr.time) / (next.time - curr.time);
-      // Does not work:
-      //for(let i=0; i<3; i++)
-      //  vals[i] += (next.obj[i] - vals[i]) * t;
-      // Works:
-      vals = vec3Add(vals, vec3Scale(vec3Add(next.obj, vec3Negate(vals)), t));
-    }
-    radius = vals[0];
-    phi = vals[1];
-    theta = vals[2];
-    // TODO Apply unsteady cam again?
+    let next = CAMERA_EVENTS[activeCameraEventIndex + 1];
+    let t = (timeInBeats - curr.time) / (next.time - curr.time);
+    for(let i=0; i<3; i++)
+      view[i] = curr.obj[i] + (next.obj[i] - curr.obj[i]) * t;
   }
 }
 
 function resetView()
 {
-  radius = gridRes * 0.5;
-  phi = Math.PI * 0.5;
-  theta = 0;
+  view = [gridRes * 0.5, Math.PI * 0.5, 0];
 }
 
 function setGrid(obj)
@@ -595,7 +568,7 @@ async function handleKeyEvent(e)
       setRules({ ruleSet: -activeRuleSet }); // Enable or disable activity of current rule set (pos/neg)
       break;
     case ".":
-      recordCameraEvent([radius, phi, theta]); 
+      recordCameraEvent(view); 
       break;
     case ">":
       // Re-render and restart audio from last audio position
@@ -630,18 +603,18 @@ function handleCameraControlEvent(e)
   switch(e.key)
   {
     case "s":
-      radius += MOVE_VELOCITY;
+      view[0] += MOVE_VELOCITY;
       break;
     case "w":
-      radius = Math.max(radius - MOVE_VELOCITY, 0.01);
+      view[0] = Math.max(view[0] - MOVE_VELOCITY, 0.01);
       break;
   }
 }
 
 function handleMouseMoveEvent(e)
 {
-  phi = (phi + e.movementX * LOOK_VELOCITY) % (2.0 * Math.PI);
-  theta = Math.min(Math.max(theta + e.movementY * LOOK_VELOCITY, -1.5), 1.5);
+  view[1] = (view[1] + e.movementX * LOOK_VELOCITY) % (2.0 * Math.PI);
+  view[2] = Math.min(Math.max(view[2] + e.movementY * LOOK_VELOCITY, -1.5), 1.5);
 }
 
 function handleMouseWheelEvent(e)

@@ -1,14 +1,10 @@
 const FULLSCREEN = false;
 const BPM = 120;
 
-const ASPECT = 1.6;
 const CANVAS_WIDTH = 1024; // Careful, this is also hardcoded in the shader!!
-const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
-const FOV = 50.0;
+const CANVAS_HEIGHT = CANVAS_WIDTH / 1.6;
 
-const AUDIO_BUFFER_SIZE = 4096 * 4096;
-
-const MAX_GRID_RES = 256;
+const BUFFER_DIM = 256; // Used for audio buffer and grid buffer
 
 let audioContext;
 let audioBufferSourceNode;
@@ -26,19 +22,15 @@ let renderPassDescriptor;
 let canvas;
 let context;
 
-let radius, phi, theta;
-
-let rand;
-let gridRes;
+let view = [];
+let grid = new Uint32Array(3 + (BUFFER_DIM ** 3));
+let rules = new Uint32Array(1 + 2 * 27);
 let updateDelay = 0.5;
-let grid;
-let rules;
 
 let startTime;
 let timeInBeats = 0;
 let lastSimulationUpdateTime = 0;
 let simulationIteration = 0;
-let gridBufferUpdateOffset = 0;
 let activeRuleSet;
 let activeSimulationEventIndex = -1;
 let activeCameraEventIndex = -1;
@@ -59,7 +51,7 @@ const RULES = [
 ];
 
 const SIMULATION_EVENTS = [
-{ time: 0, obj: { ruleSet: 3, delta: -0.320, seed: 4079287172, gridRes: MAX_GRID_RES, area: 24 } },
+{ time: 0, obj: { ruleSet: 3, delta: -0.320 } },
 { time: 40, obj: { ruleSet: 4, delta: 0.320 } },
 { time: 60, obj: { ruleSet: 3, delta: 0.05 } },
 { time: 80, obj: { ruleSet: 1, delta: 0.125 } },
@@ -724,21 +716,6 @@ function splitmix32(a) {
   }
 }
 
-function vec3Add(a, b)
-{
-  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
-}
-
-function vec3Negate(v)
-{
-  return [-v[0], -v[1], -v[2]];
-}
-
-function vec3Scale(v, s)
-{
-  return [v[0] * s, v[1] * s, v[2] * s];
-}
-
 async function createComputePipeline(shaderModule, pipelineLayout, entryPoint)
 {
   return device.createComputePipelineAsync({
@@ -767,12 +744,12 @@ async function createRenderPipeline(shaderModule, pipelineLayout, vertexEntryPoi
   });
 }
 
-function encodeComputePassAndSubmit(commandEncoder, pipeline, bindGroup, countX, countY, countZ)
+function encodeComputePassAndSubmit(commandEncoder, pipeline, bindGroup, count)
 {
   const passEncoder = commandEncoder.beginComputePass();
   passEncoder.setPipeline(pipeline);
   passEncoder.setBindGroup(0, bindGroup);
-  passEncoder.dispatchWorkgroups(countX, countY, countZ);
+  passEncoder.dispatchWorkgroups(count, count, count);
   passEncoder.end();
 }
 
@@ -788,10 +765,10 @@ function encodeRenderPassAndSubmit(commandEncoder, passDescriptor, pipeline, bin
 async function createAudioResources()
 {
   audioContext = new AudioContext();
-  webAudioBuffer = audioContext.createBuffer(2, AUDIO_BUFFER_SIZE, audioContext.sampleRate);
+  webAudioBuffer = audioContext.createBuffer(2, BUFFER_DIM ** 3, audioContext.sampleRate);
 
   let audioBuffer = device.createBuffer({
-    size: AUDIO_BUFFER_SIZE * 2 * 4, 
+    size: (BUFFER_DIM ** 3) * 2 * 4,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC});
 
   let audioUniformBuffer = device.createBuffer({
@@ -812,21 +789,20 @@ async function createAudioResources()
     ]});
 
   let audioReadBuffer = device.createBuffer({
-    size: AUDIO_BUFFER_SIZE * 2 * 4,
+    size: (BUFFER_DIM ** 3) * 2 * 4,
     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST});
 
   let audioPipelineLayout = device.createPipelineLayout({bindGroupLayouts: [audioBindGroupLayout]});
 
-  device.queue.writeBuffer(audioUniformBuffer, 0, new Uint32Array([Math.ceil(Math.cbrt(AUDIO_BUFFER_SIZE)), audioContext.sampleRate]));
+  device.queue.writeBuffer(audioUniformBuffer, 0, new Uint32Array([BUFFER_DIM, audioContext.sampleRate]));
 
   let pipeline = await createComputePipeline(device.createShaderModule({code: AUDIO_SHADER}), audioPipelineLayout, "audioMain");
 
   let commandEncoder = device.createCommandEncoder();
 
-  let count = Math.ceil(Math.cbrt(AUDIO_BUFFER_SIZE) / 4);
-  encodeComputePassAndSubmit(commandEncoder, pipeline, audioBindGroup, count, count, count);
+  encodeComputePassAndSubmit(commandEncoder, pipeline, audioBindGroup, BUFFER_DIM / 4);
 
-  commandEncoder.copyBufferToBuffer(audioBuffer, 0, audioReadBuffer, 0, AUDIO_BUFFER_SIZE * 2 * 4);
+  commandEncoder.copyBufferToBuffer(audioBuffer, 0, audioReadBuffer, 0, (BUFFER_DIM ** 3) * 2 * 4);
 
   device.queue.submit([commandEncoder.finish()]);
 
@@ -836,7 +812,7 @@ async function createAudioResources()
   let channel0 = webAudioBuffer.getChannelData(0);
   let channel1 = webAudioBuffer.getChannelData(1);
 
-  for(let i=0; i<AUDIO_BUFFER_SIZE; i++) {
+  for(let i=0; i<BUFFER_DIM ** 3; i++) {
     channel0[i] = audioData[(i << 1) + 0];
     channel1[i] = audioData[(i << 1) + 1];
   }
@@ -859,9 +835,8 @@ async function createRenderResources()
     ]
   });
  
-  // Right, up, dir, eye, fov, time, simulation step, programmable value/padding
   uniformBuffer = device.createBuffer({
-    size: 16 * 4, 
+    size: 4 * 4, // radius, phi, theta, time
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
 
   for(let i=0; i<2; i++)
@@ -905,7 +880,6 @@ let last;
 
 function render(time)
 {  
-  //setPerformanceTimer();
   if(last !== undefined) {
     let frameTime = (performance.now() - last);
     document.title = `${(frameTime).toFixed(2)} / ${(1000.0 / frameTime).toFixed(2)}`;
@@ -926,8 +900,7 @@ function render(time)
  
   if(activeRuleSet > 0) {
     if(timeInBeats - lastSimulationUpdateTime > updateDelay) {
-      const count = Math.ceil(gridRes / 4);
-      encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], count, count, count); 
+      encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], BUFFER_DIM / 4); 
       simulationIteration++;
       lastSimulationUpdateTime = (audioContext.currentTime - startTime) * BPM / 60;
     }
@@ -935,7 +908,7 @@ function render(time)
     lastSimulationUpdateTime = timeInBeats;
 
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
-    radius, phi, theta, timeInBeats //, Math.abs(activeRuleSet) - 1
+    ...view, timeInBeats //, Math.abs(activeRuleSet) - 1
   ]));
 
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
@@ -946,26 +919,25 @@ function render(time)
   requestAnimationFrame(render);
 }
 
-function setPerformanceTimer(timerName)
-{
-  let begin = performance.now();
-  device.queue.onSubmittedWorkDone()
-    .then(function() {
-      let end = performance.now();
-      let frameTime = end - begin;
-      document.title = `${(frameTime).toFixed(2)} / ${(1000.0 / frameTime).toFixed(2)}`;
-    }).catch(function(err) {
-      console.log(err);
-    });
-}
-
 function updateSimulation()
 {
   if(activeSimulationEventIndex + 1 < SIMULATION_EVENTS.length && timeInBeats >= SIMULATION_EVENTS[activeSimulationEventIndex + 1].time) {
-    let eventObj = SIMULATION_EVENTS[++activeSimulationEventIndex].obj;
-    setGrid(eventObj);
-    setRules(eventObj);
-    setTime(eventObj);
+    let o = SIMULATION_EVENTS[++activeSimulationEventIndex].obj;
+
+    // Rules
+    if(o.ruleSet !== undefined) {
+      activeRuleSet = o.ruleSet; // Can be active (positive) or inactive (negative), zero is excluded by definition
+      let rulesBitsBigInt = RULES[Math.abs(activeRuleSet)];
+      // State count (bit 0-3)
+      rules[0] = Number(rulesBitsBigInt & BigInt(0xf));
+      // Alive bits (4-31), birth bits (32-59)
+      for(let i=0; i<rules.length - 1; i++)
+        rules[1 + i] = Number((rulesBitsBigInt >> BigInt(4 + i)) & BigInt(0x1));
+      device.queue.writeBuffer(rulesBuffer, 0, rules);
+    }
+
+    // Time
+    updateDelay = (o.delta === undefined) ? updateDelay : updateDelay + o.delta;
   }
 }
 
@@ -974,69 +946,37 @@ function updateCamera()
   if(activeCameraEventIndex + 1 < CAMERA_EVENTS.length && timeInBeats >= CAMERA_EVENTS[activeCameraEventIndex + 1].time)
     ++activeCameraEventIndex;
 
-  if(activeCameraEventIndex >= 0) {
+  if(activeCameraEventIndex >= 0 && activeCameraEventIndex + 1 < CAMERA_EVENTS.length) {
     let curr = CAMERA_EVENTS[activeCameraEventIndex];
-    let vals = curr.obj;
-    if(activeCameraEventIndex + 1 < CAMERA_EVENTS.length) {
-      let next = CAMERA_EVENTS[activeCameraEventIndex + 1];
-      vals = vec3Add(vals, vec3Scale(vec3Add(next.obj, vec3Negate(vals)), (timeInBeats - curr.time) / (next.time - curr.time)));
-    }
-    radius = vals[0];
-    phi = vals[1];
-    theta = vals[2];
-    // TODO Apply unsteady cam again
+    let next = CAMERA_EVENTS[activeCameraEventIndex + 1];
+    let t = (timeInBeats - curr.time) / (next.time - curr.time);
+    for(let i=0; i<3; i++)
+      view[i] = curr.obj[i] + (next.obj[i] - curr.obj[i]) * t;
   }
 }
 
-// TODO This will likely be thrown out completely (we just need to initially create the grid)
-function setGrid(obj)
+function setGrid(area)
 {
-  if(obj.gridRes === undefined)
-    return;
-
   for(let i=0; i<grid.length; i++)
     grid[i] = 0;
 
-  rand = splitmix32(obj.seed);
-  gridRes = obj.gridRes;
-
   grid[0] = 1;
-  grid[1] = gridRes;
-  grid[2] = gridRes * gridRes;
+  grid[1] = BUFFER_DIM;
+  grid[2] = BUFFER_DIM ** 2;
 
-  const center = gridRes * 0.5; 
-  const d = obj.area * 0.5;
+  const center = BUFFER_DIM * 0.5;
+  const d = area * 0.5;
+
+  let rand = splitmix32(4079287172);
 
   // TODO Make initial grid somewhat more interesting
   for(let k=center - d; k<center + d; k++)
     for(let j=center - d; j<center + d; j++)
       for(let i=center - d; i<center + d; i++)
-        grid[3 + gridRes * gridRes * k + gridRes * j + i] = rand() > 0.6 ? 1 : 0;
+        grid[3 + (BUFFER_DIM ** 2) * k + BUFFER_DIM * j + i] = rand() > 0.6 ? 1 : 0;
 
   device.queue.writeBuffer(gridBuffer[0], 0, grid);
   device.queue.writeBuffer(gridBuffer[1], 0, grid);
-}
-
-// TODO Pull the next two functions into updateSimulation()
-function setRules(obj)
-{
-  // TODO Check if bitwise encoding is in fact larger than simply keeping the bitfield as raw array
-  if(obj.ruleSet !== undefined) {
-    activeRuleSet = obj.ruleSet; // Can be active (positive) or inactive (negative), zero is excluded by definition
-    let rulesBitsBigInt = RULES[Math.abs(activeRuleSet)];
-    // State count (bit 0-3)
-    rules[0] = Number(rulesBitsBigInt & BigInt(0xf));
-    // Alive bits (4-31), birth bits (32-59)
-    for(let i=0; i<rules.length - 1; i++)
-      rules[1 + i] = Number((rulesBitsBigInt >> BigInt(4 + i)) & BigInt(0x1));
-    device.queue.writeBuffer(rulesBuffer, 0, rules);
-  }
-}
-
-function setTime(obj)
-{
-  if(obj.delta !== undefined)
-    updateDelay += obj.delta;
 }
 
 function startRender()
@@ -1055,41 +995,28 @@ function startRender()
 
   updateSimulation();
   updateCamera();
-
   requestAnimationFrame(render);
 }
 
 async function main()
 {
   if(!navigator.gpu)
-    throw new Error("WebGPU is not supported on this browser.");
+    alert("No WebGPU");
 
   const gpuAdapter = await navigator.gpu.requestAdapter();
-  if(!gpuAdapter)
-    throw new Error("Can not use WebGPU. No GPU adapter available.");
-
   device = await gpuAdapter.requestDevice();
-  if(!device)
-    throw new Error("Failed to request logical device.");
 
   await createAudioResources();
-
-  grid = new Uint32Array(3 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
-  rules = new Uint32Array(1 + 2 * 27);
-
   await createRenderResources();
+  setGrid(24);
 
   document.body.innerHTML = "<button>CLICK<canvas style='width:0;cursor:none'>";
   canvas = document.querySelector("canvas");
   canvas.width = CANVAS_WIDTH;
   canvas.height = CANVAS_HEIGHT;
 
-  let presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-  if(presentationFormat !== "bgra8unorm")
-    throw new Error(`Expected canvas pixel format of bgra8unorm but was '${presentationFormat}'.`);
-
   context = canvas.getContext("webgpu");
-  context.configure({device, format: presentationFormat, alphaMode: "opaque"});
+  context.configure({device, format: "bgra8unorm", alphaMode: "opaque"});
 
   document.querySelector("button").addEventListener("click", startRender);
 }
