@@ -1,19 +1,24 @@
 struct Uniforms
 {
-  right: vec3f,
+  radius: f32,
+  phi: f32,
+  theta: f32,
+  time: f32,
+  //ruleSet: f32
+
+  /*right: vec3f,
   tanHalfFov: f32,
   up: vec3f,
   time: f32,
   forward: vec3f,
   ruleSet: f32,
   eye: vec3f,
-  freeValue2: f32
+  freeValue2: f32*/
 }
 
 struct Grid
 {
   mul: vec3i,
-  zOfs: u32,
   arr: array<u32>
 }
 
@@ -120,12 +125,7 @@ fn evalState(pos: vec3i, states: u32)
 @compute @workgroup_size(4,4,4)
 fn computeMain(@builtin(global_invocation_id) globalId: vec3u)
 {
-  var pos = vec3i(i32(globalId.x), i32(globalId.y), i32(globalId.z + grid.zOfs));
-  if(pos.z >= grid.mul.y) {
-    return;
-  }
-
-  evalState(pos, rules.states);
+  evalState(vec3i(globalId), rules.states);
 }
 
 fn minComp(v: vec3f) -> f32
@@ -227,7 +227,7 @@ fn shade(pos: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> vec3f
 
   let val = f32(rules.states) / f32(min((*hit).state, rules.states));
   let sky = 0.4 + (*hit).norm.y * 0.6;
-  let col = vec3f(0.005) + ruleSetTints[u32(uniforms.ruleSet)] * (vec3f(0.5) + pos / f32(grid.mul.y)) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
+  let col = vec3f(0.005) + /*ruleSetTints[u32(uniforms.ruleSet)] * */(vec3f(0.5) + pos / f32(grid.mul.y)) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
   let occ = calcOcclusion(pos, (*hit).index, vec3i((*hit).norm));
 
   return col * occ * occ * occ;
@@ -283,10 +283,19 @@ fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec
 @fragment
 fn fragmentMain(@builtin(position) position: vec4f) -> @location(0) vec4f
 {
-  // Framebuffer y-down in webgpu
-  let dirEyeSpace = normalize(vec3f((position.xy - vec2f(WIDTH, HEIGHT) * 0.5) / f32(HEIGHT), uniforms.tanHalfFov));
-  var dir = uniforms.right * dirEyeSpace.x - uniforms.up * dirEyeSpace.y + uniforms.forward * dirEyeSpace.z;
-  var ori = uniforms.eye;
+  // Camera
+  let FOV = 50.0;
+  let tanHalfFov = 0.5 / tan(0.5 * radians(FOV));
+  
+  let dirEyeSpace = normalize(vec3f((position.xy - vec2f(WIDTH, HEIGHT) * 0.5) / f32(HEIGHT), tanHalfFov));
+
+  let ori = vec3f(uniforms.radius * cos(uniforms.theta) * cos(uniforms.phi), uniforms.radius * sin(uniforms.theta), uniforms.radius * cos(uniforms.theta) * sin(uniforms.phi));
+
+  let fwd = normalize(-ori);
+  let ri = normalize(cross(fwd, vec3f(0, 1, 0)));
+  let up = cross(ri, fwd);
+
+  var dir = ri * dirEyeSpace.x - up * dirEyeSpace.y + fwd * dirEyeSpace.z;
 
   var col = vec3f(0.0);
   var hit: Hit;

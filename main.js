@@ -18,7 +18,6 @@ const FOV = 50.0;
 const AUDIO_BUFFER_SIZE = 4096 * 4096;
 
 const MAX_GRID_RES = 256;
-const SIMULATION_UPDATE_STEPS = 4;
 const DEFAULT_UPDATE_DELAY = 0.5;
 
 const MOVE_VELOCITY = 0.75;
@@ -324,9 +323,8 @@ async function createRenderResources()
     ]
   });
  
-  // Right, up, dir, eye, fov, time, simulation step, programmable value/padding
   uniformBuffer = device.createBuffer({
-    size: 16 * 4, 
+    size: 4 * 4, // radius, phi, theta, time 
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
 
   for(let i=0; i<2; i++)
@@ -403,38 +401,31 @@ function render(time)
     updateSimulation();
     updateCamera();
   }
- 
-  if(!idle && activeRuleSet >= 0) {
-    if(gridBufferUpdateOffset < gridRes) {
-      const count = Math.ceil(gridRes / 4);
-      device.queue.writeBuffer(gridBuffer[simulationIteration % 2], 12, new Uint32Array([gridBufferUpdateOffset]));
-      encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], count, count, count / SIMULATION_UPDATE_STEPS); 
-      gridBufferUpdateOffset += count / SIMULATION_UPDATE_STEPS * 4;
-    }
+
+  if(!idle && activeRuleSet > 0) {
     if(timeInBeats - lastSimulationUpdateTime > updateDelay) {
-      if(gridBufferUpdateOffset >= gridRes) {
-        simulationIteration++;
-        gridBufferUpdateOffset = 0;
-        lastSimulationUpdateTime = ((AUDIO ? audioContext.currentTime : time / 1000.0) - startTime) * BPM / 60;
-      } else {
-        console.log("WARNING: Simulation update not finished within time budget.");
-      }
+      const count = Math.ceil(gridRes / 4);
+      encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], count, count, count); 
+      simulationIteration++;
+      lastSimulationUpdateTime = ((AUDIO ? audioContext.currentTime : time / 1000.0) - startTime) * BPM / 60;
     }
   } else {
-    gridBufferUpdateOffset = 0;
     lastSimulationUpdateTime = timeInBeats;
   }
 
-  let view = calcView();
+  //let view = calcView();
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
+    radius, phi, theta, timeInBeats //, Math.abs(activeRuleSet) - 1
+    /*
     ...view.right,
-    0.5 / Math.tan(0.5 * FOV * Math.PI / 180.0),
+    0.5 / Math.tan(0.5 * FOV * Math.PI / 180.0), // Not required anymore
     ...view.up,
     timeInBeats,
     ...view.dir,
     Math.abs(activeRuleSet) - 1,
     ...view.eye,
     1.0 // free value
+    */
   ]));
 
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
@@ -478,15 +469,20 @@ function updateCamera()
     let vals = curr.obj;
     if(activeCameraEventIndex + 1 < CAMERA_EVENTS.length) {
       let next = CAMERA_EVENTS[activeCameraEventIndex + 1];
-      vals = vec3Add(vals, vec3Scale(vec3Add(next.obj, vec3Negate(vals)), (timeInBeats - curr.time) / (next.time - curr.time)));
+      let t = (timeInBeats - curr.time) / (next.time - curr.time);
+      // Does not work:
+      //for(let i=0; i<3; i++)
+      //  vals[i] += (next.obj[i] - vals[i]) * t;
+      // Works:
+      vals = vec3Add(vals, vec3Scale(vec3Add(next.obj, vec3Negate(vals)), t));
     }
     radius = vals[0];
     phi = vals[1];
     theta = vals[2];
-    // TODO Apply unsteady cam again
+    // TODO Apply unsteady cam again?
   }
 }
-
+/*
 function calcView()
 {
   let e = [radius * Math.cos(theta) * Math.cos(phi), radius * Math.sin(theta), radius * Math.cos(theta) * Math.sin(phi)];
@@ -494,7 +490,7 @@ function calcView()
   let r = vec3Normalize(vec3Cross(d, [0, 1, 0]));  
   return { eye: e, dir: d, right: r, up: vec3Cross(r, d) };
 }
-
+*/
 function resetView()
 {
   radius = gridRes * 0.5;
@@ -521,15 +517,13 @@ function setGrid(obj)
   grid[1] = gridRes;
   grid[2] = gridRes * gridRes;
 
-  // grid[3] is reserved as offset for buffer update position
-
   const center = gridRes * 0.5; 
   const d = obj.area * 0.5;
 
   for(let k=center - d; k<center + d; k++)
     for(let j=center - d; j<center + d; j++)
       for(let i=center - d; i<center + d; i++)
-        grid[4 + gridRes * gridRes * k + gridRes * j + i] = rand() > 0.6 ? 1 : 0;
+        grid[3 + gridRes * gridRes * k + gridRes * j + i] = rand() > 0.6 ? 1 : 0;
 
   device.queue.writeBuffer(gridBuffer[0], 0, grid);
   device.queue.writeBuffer(gridBuffer[1], 0, grid);
@@ -754,8 +748,8 @@ async function main()
     await renderAudio();
   }
 
-  // Grid mul + buffer update z-offset + grid
-  grid = new Uint32Array(4 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
+  // Grid mul + grid
+  grid = new Uint32Array(3 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
   
   // State count + alive rules + birth rules
   rules = new Uint32Array(1 + 2 * 27);

@@ -9,7 +9,6 @@ const FOV = 50.0;
 const AUDIO_BUFFER_SIZE = 4096 * 4096;
 
 const MAX_GRID_RES = 256;
-const SIMULATION_UPDATE_STEPS = 4;
 
 let audioContext;
 let audioBufferSourceNode;
@@ -834,24 +833,14 @@ function render(time)
   updateSimulation();
   updateCamera();
  
-  if(activeRuleSet >= 0) {
-    if(gridBufferUpdateOffset < gridRes) {
-      const count = Math.ceil(gridRes / 4);
-      device.queue.writeBuffer(gridBuffer[simulationIteration % 2], 12, new Uint32Array([gridBufferUpdateOffset]));
-      encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], count, count, count / SIMULATION_UPDATE_STEPS); 
-      gridBufferUpdateOffset += count / SIMULATION_UPDATE_STEPS * 4;
-    }
+  if(!idle && activeRuleSet > 0) {
     if(timeInBeats - lastSimulationUpdateTime > updateDelay) {
-      if(gridBufferUpdateOffset >= gridRes) {
-        simulationIteration++;
-        gridBufferUpdateOffset = 0;
-        lastSimulationUpdateTime = (audioContext.currentTime - startTime) * BPM / 60;
-      } else {
-        console.log("WARNING: Simulation update not finished within time budget.");
-      }
+      const count = Math.ceil(gridRes / 4);
+      encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], count, count, count); 
+      simulationIteration++;
+      lastSimulationUpdateTime = ((AUDIO ? audioContext.currentTime : time / 1000.0) - startTime) * BPM / 60;
     }
   } else {
-    gridBufferUpdateOffset = 0;
     lastSimulationUpdateTime = timeInBeats;
   }
 
@@ -950,8 +939,6 @@ function setGrid(obj)
   grid[1] = gridRes;
   grid[2] = gridRes * gridRes;
 
-  // grid[3] is reserved as offset for buffer update position
-
   const center = gridRes * 0.5; 
   const d = obj.area * 0.5;
 
@@ -959,7 +946,7 @@ function setGrid(obj)
   for(let k=center - d; k<center + d; k++)
     for(let j=center - d; j<center + d; j++)
       for(let i=center - d; i<center + d; i++)
-        grid[4 + gridRes * gridRes * k + gridRes * j + i] = rand() > 0.6 ? 1 : 0;
+        grid[3 + gridRes * gridRes * k + gridRes * j + i] = rand() > 0.6 ? 1 : 0;
 
   device.queue.writeBuffer(gridBuffer[0], 0, grid);
   device.queue.writeBuffer(gridBuffer[1], 0, grid);
@@ -1023,7 +1010,7 @@ async function main()
 
   await createAudioResources();
 
-  grid = new Uint32Array(4 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
+  grid = new Uint32Array(3 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
   rules = new Uint32Array(1 + 2 * 27);
 
   await createRenderResources();

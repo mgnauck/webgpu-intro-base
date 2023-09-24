@@ -249,7 +249,7 @@ fn audioMain(@builtin(global_invocation_id) globalId: vec3u)
 
   // Samples are calculated in mono and then written to left/right
   var output = vec2(0.0);
-
+/*
   for(var patternIndex=0; patternIndex<PATTERN_COUNT; patternIndex++)
   {
     let pattern = PATTERNS[patternIndex];
@@ -259,7 +259,7 @@ fn audioMain(@builtin(global_invocation_id) globalId: vec3u)
       let patternTime = f32(patternIndex) * TIME_PER_PATTERN + f32(rowIndex) * TIME_PER_BEAT;
       let noteTime = musicTime - patternTime;
       let row = pattern[rowIndex];
-      let notes = array<Note, 4>(row.note1, row.note2, row.note3, row.note4);
+      let notes = array<Note, 1>(row.note1, row.note2, row.note3, row.note4);
 
       for(var noteIndex=0; noteIndex<4; noteIndex++)
       {
@@ -292,7 +292,7 @@ fn audioMain(@builtin(global_invocation_id) globalId: vec3u)
       }
     }
   }
-
+*/
   // Write 2 floats between -1 and 1 to output buffer (stereo)
   buffer[sample] = clamp(output, vec2f(-1), vec2f(1));
 }
