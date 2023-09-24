@@ -80,30 +80,12 @@ const PI = 3.141592654;
 const TAU = 6.283185307;
 const TIME_PER_BEAT = 60.0 / BPM / 4.0;
 const TIME_PER_PATTERN = 60.0 / BPM * 4.0;
-const PATTERN_COUNT = 6;
+const PATTERN_COUNT = 2;
 const PATTERN_ROW_COUNT = 16;
 const KICK = 0;
 const HIHAT = 1;
 const BASS = 2;
 const DURCH = 3;
-
-struct Note 
-{
-  note: i32,
-  instr: i32,
-  amp: f32
-}
-
-struct Row 
-{
-  note1: Note,
-  note2: Note,
-  note3: Note,
-  note4: Note
-}
-
-const NoteOff = Note(-1, -1, 0.0);
-const RowOff = Row(NoteOff, NoteOff, NoteOff, NoteOff);
 
 // Suboptimal random (ripped from somewhere)
 fn rand(co: vec2f) -> f32
@@ -213,56 +195,6 @@ fn noteToFreq(note: f32) -> f32
   return 440.0 * pow(2.0, (note - 69.0) / 12.0);
 }
 
-const PATTERN_1 = array<Row, PATTERN_ROW_COUNT>
-( 
-  Row(Note(33,KICK,0.5), Note(33,HIHAT,0.25), Note(33,DURCH,0.15), NoteOff),
-  RowOff, 
-  Row(NoteOff, Note(33,HIHAT,0.15), Note(33+12,DURCH,0.20), Note(33,BASS,0.20)),
-  RowOff,
-  Row(NoteOff, Note(33,HIHAT,0.25), Note(33+24,DURCH,0.25), Note(33,BASS,0.20)),
-  RowOff, 
-  Row(Note(33,KICK,0.3), Note(33,HIHAT,0.15), NoteOff, Note(33,BASS,0.10)),
-  RowOff,
-  Row(NoteOff, Note(33,HIHAT,0.25), NoteOff, NoteOff),
-  RowOff, 
-  Row(NoteOff, Note(33,HIHAT,0.15), Note(33+24,DURCH,0.1), Note(33,BASS,0.20)),
-  RowOff,
-  Row(Note(33,KICK,0.4), Note(33,HIHAT,0.25), NoteOff, Note(33,BASS,0.20)),
-  RowOff, 
-  Row(NoteOff, Note(33,HIHAT,0.15), Note(33+24,DURCH,0.02), Note(33,BASS,0.20)),
-  Row(NoteOff, Note(33,HIHAT,0.05), NoteOff, NoteOff),
-);
-
-const PATTERN_2 = array<Row, PATTERN_ROW_COUNT>
-( 
-  Row(Note(33,KICK,0.5), Note(33,HIHAT,0.25), Note(33,BASS,0.20), NoteOff),
-  RowOff, 
-  Row(NoteOff, Note(33,HIHAT,0.15), NoteOff, NoteOff),
-  RowOff,
-  Row(NoteOff, Note(33,HIHAT,0.25), NoteOff, NoteOff),
-  RowOff, 
-  Row(Note(33,KICK,0.4), Note(33,HIHAT,0.15), Note(33,BASS,0.20), NoteOff),
-  RowOff,
-  Row(NoteOff, Note(33,HIHAT,0.25), NoteOff, NoteOff),
-  RowOff, 
-  Row(NoteOff, Note(33,HIHAT,0.15), Note(33+36-7,DURCH,0.2), NoteOff),
-  Row(NoteOff, NoteOff, Note(33+36-7-7,DURCH,0.1), NoteOff),
-  Row(Note(33,KICK,0.4), Note(33,HIHAT,0.25), Note(33+24,DURCH,0.2), Note(33+12,BASS,0.20)),
-  RowOff, 
-  Row(NoteOff, Note(33,HIHAT,0.15), Note(33,DURCH,0.1), NoteOff),
-  Row(NoteOff, Note(33,HIHAT,0.05), NoteOff, NoteOff),
-);
-
-const PATTERNS = array<array<Row, PATTERN_ROW_COUNT>, PATTERN_COUNT> 
-( 
-  PATTERN_1,
-  PATTERN_2,
-  PATTERN_1,
-  PATTERN_2,
-  PATTERN_1,
-  PATTERN_2,
-);
-
 fn sine(time: f32, freq: f32) -> f32
 {
   return sin(time * TAU * freq);
@@ -302,6 +234,40 @@ fn sample2(time: f32, freq: f32) -> f32
   return sample1(time, freq);
 }
 
+fn addSample(idx: u32, time: f32, pat: u32, dur: f32, freq: f32, amp: f32) -> f32
+{
+  let sampleTime = time - f32(pat) * TIME_PER_BEAT;
+
+  if( sampleTime < 0.0 || sampleTime > dur )
+  {
+    return 0.0;
+  }
+
+  // if the duration causes the sound to shutdown we want
+  // at least a quick ramp down to zero to not cause a click
+  // this seems to work but better double check again!
+  let env = amp * smoothstep(0.0, 0.05, dur-sampleTime);
+
+  if(idx == KICK)
+  {
+    return kick(sampleTime, freq) * env;
+  }
+  else if(idx == HIHAT)
+  {
+    return hihat(sampleTime, freq) * env;
+  }
+  {
+    return 0.0;
+  }
+}
+
+fn isPattern(time: f32, start: u32, end: u32) -> bool
+{
+  let patternIndex = u32(time / TIME_PER_PATTERN) % PATTERN_COUNT; 
+
+  return patternIndex >= start && patternIndex < end;
+}
+
 @group(0) @binding(0) var<uniform> params: AudioParameters;
 @group(0) @binding(1) var<storage, read_write> buffer: array<vec2f>;
 
@@ -316,54 +282,49 @@ fn audioMain(@builtin(global_invocation_id) globalId: vec3u)
   // Calculate current sample from given buffer id
   let sample = dot(globalId, vec3u(1, params.bufferDim, params.bufferDim * params.bufferDim));
   let time = f32(sample) / f32(params.sampleRate);
-  let musicTime = time % (TIME_PER_PATTERN * PATTERN_COUNT);
+  let patternTime = time % TIME_PER_PATTERN;
 
   // Samples are calculated in mono and then written to left/right
   var output = vec2(0.0);
-/*
-  for(var patternIndex=0; patternIndex<PATTERN_COUNT; patternIndex++)
+
+  // pattern 0
+  if(isPattern(time, 0, 1))
   {
-    let pattern = PATTERNS[patternIndex];
+    output += addSample(KICK, patternTime,  0, 1.0, 55.0, 0.5 );
+    output += addSample(KICK, patternTime,  4, 1.0, 55.0, 0.4 );
+    output += addSample(KICK, patternTime,  8, 1.0, 55.0, 0.3 );
+    output += addSample(KICK, patternTime, 12, 1.0, 55.0, 0.4 );
 
-    for(var rowIndex=0; rowIndex<PATTERN_ROW_COUNT; rowIndex++)
-    {
-      let patternTime = f32(patternIndex) * TIME_PER_PATTERN + f32(rowIndex) * TIME_PER_BEAT;
-      let noteTime = musicTime - patternTime;
-      let row = pattern[rowIndex];
-      let notes = array<Note, 1>(row.note1, row.note2, row.note3, row.note4);
-
-      for(var noteIndex=0; noteIndex<4; noteIndex++)
-      {
-        let note = notes[noteIndex];
-
-        if(note.note > -1 && note.instr > -1 && noteTime > 0.0)
-        {
-          let noteFreq = noteToFreq(f32(note.note));
-          var instrOutput = 0.0;
-
-          if(note.instr == KICK)
-          { 
-            instrOutput = kick(noteTime, noteFreq);
-          }
-          else if(note.instr == HIHAT)
-          {
-            instrOutput = hihat(noteTime, noteFreq);
-          }
-          else if(note.instr == BASS)
-          {
-            instrOutput = bass(noteTime, noteFreq);
-          }
-          else if(note.instr == DURCH)
-          {
-            instrOutput = sample1(noteTime, noteFreq);
-          }
-
-          output += instrOutput * note.amp;
-        }
-      }
-    }
+    output += addSample(HIHAT, patternTime,  0, 1.0, 55.0, 0.5 );
+    output += addSample(HIHAT, patternTime,  2, 1.0, 55.0, 0.25 );
+    output += addSample(HIHAT, patternTime,  4, 1.0, 55.0, 0.5 );
+    output += addSample(HIHAT, patternTime,  6, 1.0, 55.0, 0.25 );
+    output += addSample(HIHAT, patternTime,  8, 1.0, 55.0, 0.5 );
+    output += addSample(HIHAT, patternTime, 10, 1.0, 55.0, 0.25 );
+    output += addSample(HIHAT, patternTime, 12, 1.0, 55.0, 0.5 );
+    output += addSample(HIHAT, patternTime, 14, 1.0, 55.0, 0.25 );
+    output += addSample(HIHAT, patternTime, 15, 1.0, 55.0, 0.1 );
   }
-*/
+  // pattern 1
+  if(isPattern(time, 1, 2))
+  {
+    output += addSample(KICK, patternTime,  0, 1.0, 55.0, 0.5 );
+    output += addSample(KICK, patternTime,  4, 1.0, 55.0, 0.4 );
+    output += addSample(KICK, patternTime,  8, 1.0, 55.0, 0.3 );
+    output += addSample(KICK, patternTime, 12, 1.0, 55.0, 0.4 );
+    output += addSample(KICK, patternTime, 15, 1.0, 55.0, 0.5 );
+
+    output += addSample(HIHAT, patternTime,  0, 1.0, 55.0, 0.5 );
+    output += addSample(HIHAT, patternTime,  2, 1.0, 55.0, 0.25 );
+    output += addSample(HIHAT, patternTime,  4, 1.0, 55.0, 0.5 );
+    output += addSample(HIHAT, patternTime,  6, 1.0, 55.0, 0.25 );
+    output += addSample(HIHAT, patternTime,  8, 1.0, 55.0, 0.5 );
+    output += addSample(HIHAT, patternTime, 10, 1.0, 55.0, 0.25 );
+    output += addSample(HIHAT, patternTime, 12, 1.0, 55.0, 0.5 );
+    output += addSample(HIHAT, patternTime, 14, 1.0, 55.0, 0.25 );
+    output += addSample(HIHAT, patternTime, 15, 1.0, 55.0, 0.1 );
+  }
+
   // Write 2 floats between -1 and 1 to output buffer (stereo)
   buffer[sample] = clamp(output, vec2f(-1), vec2f(1));
 }
