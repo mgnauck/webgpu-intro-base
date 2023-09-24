@@ -51,21 +51,21 @@ const RULES = [
 ];
 
 const SIMULATION_EVENTS = [
-{ time: 0, obj: { ruleSet: 3, delta: -0.320 } },
-{ time: 40, obj: { ruleSet: 4, delta: 0.320 } },
-{ time: 60, obj: { ruleSet: 3, delta: 0.05 } },
-{ time: 80, obj: { ruleSet: 1, delta: 0.125 } },
-{ time: 120, obj: { ruleSet: 8, delta: -0.130 } },
-{ time: 180, obj: { ruleSet: -8 } },
+{ t: 0, r: 3, d: -0.320 },
+{ t: 40, r: 4, d: 0.320 },
+{ t: 60, r: 3, d: 0.05 },
+{ t: 80, r: 1, d: 0.125 },
+{ t: 120, r: 8, d: -0.130 },
+{ t: 180, r: -8 },
 ];
 
 const CAMERA_EVENTS = [
-{ time: 0, obj: [ 42, 1.5708, 0.0000 ] },
-{ time: 40, obj: [ 320, -3.7292, 0.7250 ] },
-{ time: 60, obj: [ 240, -4.4042, -0.7000 ] },
-{ time: 80, obj: [ 200, -5.7792, 0.8000 ] },
-{ time: 120, obj: [ 170, -2.7960, -0.7000 ] },
-{ time: 180, obj: [ 220, -1.3600, 0.5000] },
+{ t: 0, v: [ 42, 1.5708, 0.0000 ] },
+{ t: 40, v: [ 320, -3.7292, 0.7250 ] },
+{ t: 60, v: [ 240, -4.4042, -0.7000 ] },
+{ t: 80, v: [ 200, -5.7792, 0.8000 ] },
+{ t: 120, v: [ 170, -2.7960, -0.7000 ] },
+{ t: 180, v: [ 220, -1.3600, 0.5000] },
 ];
 
 const AUDIO_SHADER = `
@@ -882,12 +882,12 @@ function render(time)
 
 function updateSimulation()
 {
-  if(activeSimulationEventIndex + 1 < SIMULATION_EVENTS.length && timeInBeats >= SIMULATION_EVENTS[activeSimulationEventIndex + 1].time) {
-    let o = SIMULATION_EVENTS[++activeSimulationEventIndex].obj;
+  if(activeSimulationEventIndex + 1 < SIMULATION_EVENTS.length && timeInBeats >= SIMULATION_EVENTS[activeSimulationEventIndex + 1].t) {
+    let e = SIMULATION_EVENTS[++activeSimulationEventIndex];
 
     // Rules
-    if(o.ruleSet !== undefined) {
-      activeRuleSet = o.ruleSet; // Can be active (positive) or inactive (negative), zero is excluded by definition
+    if(e.r !== undefined) {
+      activeRuleSet = e.r; // Can be active (positive) or inactive (negative), zero is excluded by definition
       let rulesBitsBigInt = RULES[Math.abs(activeRuleSet)];
       // State count (bit 0-3)
       rules[0] = Number(rulesBitsBigInt & BigInt(0xf));
@@ -898,21 +898,21 @@ function updateSimulation()
     }
 
     // Time
-    updateDelay = (o.delta === undefined) ? updateDelay : updateDelay + o.delta;
+    updateDelay = (e.d === undefined) ? updateDelay : updateDelay + e.d;
   }
 }
 
 function updateCamera()
 {
-  if(activeCameraEventIndex + 1 < CAMERA_EVENTS.length && timeInBeats >= CAMERA_EVENTS[activeCameraEventIndex + 1].time)
+  if(activeCameraEventIndex + 1 < CAMERA_EVENTS.length && timeInBeats >= CAMERA_EVENTS[activeCameraEventIndex + 1].t)
     ++activeCameraEventIndex;
 
   if(activeCameraEventIndex >= 0 && activeCameraEventIndex + 1 < CAMERA_EVENTS.length) {
     let curr = CAMERA_EVENTS[activeCameraEventIndex];
     let next = CAMERA_EVENTS[activeCameraEventIndex + 1];
-    let t = (timeInBeats - curr.time) / (next.time - curr.time);
+    let t = (timeInBeats - curr.t) / (next.t - curr.t);
     for(let i=0; i<3; i++)
-      view[i] = curr.obj[i] + (next.obj[i] - curr.obj[i]) * t;
+      view[i] = curr.v[i] + (next.v[i] - curr.v[i]) * t;
   }
 }
 

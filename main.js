@@ -98,21 +98,21 @@ const RULES_NAMES = [
 ];
 
 const SIMULATION_EVENTS = [
-{ time: 0, obj: { ruleSet: 3, delta: -0.320, seed: 4079287172, gridRes: MAX_GRID_RES, area: 24 } },
-{ time: 40, obj: { ruleSet: 4, delta: 0.320 } },
-{ time: 60, obj: { ruleSet: 3, delta: 0.05 } },
-{ time: 80, obj: { ruleSet: 1, delta: 0.125 } },
-{ time: 120, obj: { ruleSet: 8, delta: -0.130 } },
-{ time: 180, obj: { ruleSet: -8 } },
+{ t: 0, r: 3, d: -0.320 },
+{ t: 40, r: 4, d: 0.320 },
+{ t: 60, r: 3, d: 0.05 },
+{ t: 80, r: 1, d: 0.125 },
+{ t: 120, r: 8, d: -0.130 },
+{ t: 180, r: -8 },
 ];
 
 const CAMERA_EVENTS = [
-{ time: 0, obj: [ 42, 1.5708, 0.0000 ] },
-{ time: 40, obj: [ 320, -3.7292, 0.7250 ] },
-{ time: 60, obj: [ 240, -4.4042, -0.7000 ] },
-{ time: 80, obj: [ 200, -5.7792, 0.8000 ] },
-{ time: 120, obj: [ 170, -2.7960, -0.7000 ] },
-{ time: 180, obj: [ 220, -1.3600, 0.5000] },
+{ t: 0, v: [ 42, 1.5708, 0.0000 ] },
+{ t: 40, v: [ 320, -3.7292, 0.7250 ] },
+{ t: 60, v: [ 240, -4.4042, -0.7000 ] },
+{ t: 80, v: [ 200, -5.7792, 0.8000 ] },
+{ t: 120, v: [ 170, -2.7960, -0.7000 ] },
+{ t: 180, v: [ 220, -1.3600, 0.5000] },
 ];
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
@@ -413,25 +413,26 @@ function setPerformanceTimer(timerName)
 
 function updateSimulation()
 {
-  if(activeSimulationEventIndex + 1 < SIMULATION_EVENTS.length && timeInBeats >= SIMULATION_EVENTS[activeSimulationEventIndex + 1].time) {
-    let eventObj = SIMULATION_EVENTS[++activeSimulationEventIndex].obj;
-    setGrid(eventObj);
-    setRules(eventObj);
-    setTime(eventObj);
+  if(activeSimulationEventIndex + 1 < SIMULATION_EVENTS.length && timeInBeats >= SIMULATION_EVENTS[activeSimulationEventIndex + 1].t) {
+    let e = SIMULATION_EVENTS[++activeSimulationEventIndex];
+    if(e.r !== undefined)
+      setRules(e.r);
+    if(e.d !== undefined)
+      setTime(e.d);
   }
 }
 
 function updateCamera()
 {
-  if(activeCameraEventIndex + 1 < CAMERA_EVENTS.length && timeInBeats >= CAMERA_EVENTS[activeCameraEventIndex + 1].time)
-    recordCameraEvent(CAMERA_EVENTS[++activeCameraEventIndex].obj);
+  if(activeCameraEventIndex + 1 < CAMERA_EVENTS.length && timeInBeats >= CAMERA_EVENTS[activeCameraEventIndex + 1].t)
+    recordCameraEvent(CAMERA_EVENTS[++activeCameraEventIndex].v);
 
   if(activeCameraEventIndex >= 0 && activeCameraEventIndex + 1 < CAMERA_EVENTS.length) {
     let curr = CAMERA_EVENTS[activeCameraEventIndex];
     let next = CAMERA_EVENTS[activeCameraEventIndex + 1];
-    let t = (timeInBeats - curr.time) / (next.time - curr.time);
+    let t = (timeInBeats - curr.t) / (next.t - curr.t);
     for(let i=0; i<3; i++)
-      view[i] = curr.obj[i] + (next.obj[i] - curr.obj[i]) * t;
+      view[i] = curr.v[i] + (next.v[i] - curr.v[i]) * t;
   }
 }
 
@@ -440,93 +441,83 @@ function resetView()
   view = [gridRes * 0.5, Math.PI * 0.5, 0];
 }
 
-function setGrid(obj)
+function setGrid(area)
 {
-  if(obj.gridRes === undefined)
-    return;
-
   for(let i=0; i<grid.length; i++)
     grid[i] = 0;
 
-  if(seed === undefined || obj.seed != seed) {
-    seed = obj.seed === undefined ? Math.floor(Math.random() * 4294967296) : obj.seed;
-    rand = splitmix32(seed);
-  }
-
-  gridRes = Math.min(obj.gridRes, MAX_GRID_RES); // Safety
+  gridRes = MAX_GRID_RES;
 
   grid[0] = 1;
   grid[1] = gridRes;
-  grid[2] = gridRes * gridRes;
+  grid[2] = gridRes ** 2;
 
-  const center = gridRes * 0.5; 
-  const d = obj.area * 0.5;
+  const center = gridRes * 0.5;
+  const d = area * 0.5;
 
+  let rand = splitmix32(4079287172);
+
+  // TODO Make initial grid somewhat more interesting
   for(let k=center - d; k<center + d; k++)
     for(let j=center - d; j<center + d; j++)
       for(let i=center - d; i<center + d; i++)
-        grid[3 + gridRes * gridRes * k + gridRes * j + i] = rand() > 0.6 ? 1 : 0;
+        grid[3 + (gridRes ** 2) * k + gridRes * j + i] = rand() > 0.6 ? 1 : 0;
 
   device.queue.writeBuffer(gridBuffer[0], 0, grid);
   device.queue.writeBuffer(gridBuffer[1], 0, grid);
-
-  recordGridEvent(obj);
 }
 
-function setRules(obj)
+function setRules(r)
 {
-  if(obj.ruleSet !== undefined) {
-    activeRuleSet = obj.ruleSet; // Can be active (positive) or inactive (negative), zero is excluded by definition
-    let rulesBitsBigInt = RULES[Math.abs(activeRuleSet)];
-    // State count (bit 0-3)
-    rules[0] = Number(rulesBitsBigInt & BigInt(0xf));
-    // Alive bits (4-31), birth bits (32-59)
-    for(let i=0; i<rules.length - 1; i++)
-      rules[1 + i] = Number((rulesBitsBigInt >> BigInt(4 + i)) & BigInt(0x1));
-    device.queue.writeBuffer(rulesBuffer, 0, rules);
-    recordRulesEvent(obj);
-  }
+  activeRuleSet = r; // Can be active (positive) or inactive (negative), zero is excluded by definition
+ 
+  let rulesBitsBigInt = RULES[Math.abs(activeRuleSet)];
+  
+  // State count (bit 0-3)
+  rules[0] = Number(rulesBitsBigInt & BigInt(0xf));
+  
+  // Alive bits (4-31), birth bits (32-59)
+  for(let i=0; i<rules.length - 1; i++)
+    rules[1 + i] = Number((rulesBitsBigInt >> BigInt(4 + i)) & BigInt(0x1));
+  
+  device.queue.writeBuffer(rulesBuffer, 0, rules);
+  
+  recordRulesEvent(r);
 }
 
-function setTime(obj)
+function setTime(d)
 {
-  if(obj.delta !== undefined) {
-    updateDelay += obj.delta;
-    recordTimeEvent(obj);
-  }
+  updateDelay += d;
+  
+  recordTimeEvent(d);
 }
 
-function recordGridEvent(obj)
+function recordRulesEvent(r)
 {
-  console.log(`{ time: ${timeInBeats.toFixed(2)}, obj: { gridRes: ${gridRes}, seed: ${seed}, area: ${obj.area} } },`);
+  console.log(`{ t: ${timeInBeats.toFixed(2)}, r: ${r} }, // ${RULES_NAMES[Math.abs(r)]}`);
 }
 
-function recordRulesEvent(obj)
+function recordTimeEvent(d)
 {
-  console.log(`{ time: ${timeInBeats.toFixed(2)}, obj: { ruleSet: ${obj.ruleSet} } }, // ${RULES_NAMES[Math.abs(activeRuleSet)]}`);
+  console.log(`{ t: ${timeInBeats.toFixed(2)}, d: ${d.toFixed(2)} }, // updateDelay: ${updateDelay.toFixed(3)}`);
 }
 
-function recordTimeEvent(obj)
+function recordCameraEvent(v)
 {
-  console.log(`{ time: ${timeInBeats.toFixed(2)}, obj: { delta: ${obj.delta.toFixed(2)} } }, // updateDelay: ${updateDelay.toFixed(3)}`);
-}
-
-function recordCameraEvent(obj)
-{
-  console.log(`{ time: ${timeInBeats.toFixed(2)}, obj: [ ${obj[0].toFixed(1)}, ${obj[1].toFixed(4)}, ${obj[2].toFixed(4)} ] },`);
+  console.log(`{ t: ${timeInBeats.toFixed(2)}, v: [ ${v[0].toFixed(1)}, ${v[1].toFixed(4)}, ${v[2].toFixed(4)} ] },`);
 }
 
 async function handleKeyEvent(e)
 {    
   // Rule sets 1-10 (keys 0-9)
   if(e.key != " " && !isNaN(e.key)) {
-    setRules({ ruleSet: parseInt(e.key, 10) + 1 });
+    setRules(parseInt(e.key, 10) + 1);
     return;
   }
 
   // Rule set 11 (key =)
   if(e.key == "=") {
-    setRules({ ruleSet: 11 });
+    setRules(11);
     return;
   }
 
@@ -554,18 +545,15 @@ async function handleKeyEvent(e)
       }
       console.log("Idle mode " + (idle ? "enabled" : "disabled") + ", time: " + timeInBeats);
       break;
-    case "i":
-      setGrid({ gridRes: MAX_GRID_RES, seed: seed, area: 4 });
-      break;
     case "+":
-      setTime({ delta: 0.25 });
+      setTime(0.25);
       break;
     case "-":
       if(updateDelay > 0)
-        setTime({ delta: -0.25 });
+        setTime(-0.25);
       break;
     case "#":
-      setRules({ ruleSet: -activeRuleSet }); // Enable or disable activity of current rule set (pos/neg)
+      setRules(-activeRuleSet); // Enable or disable activity of current rule set (pos/neg)
       break;
     case ".":
       recordCameraEvent(view); 
@@ -582,7 +570,6 @@ async function handleKeyEvent(e)
           await suspendAudio();
         await renderAudio();
       }
-      seed = undefined;
       updateDelay = DEFAULT_UPDATE_DELAY;
       startTime = undefined;
       timeInBeats = 0;
@@ -722,6 +709,7 @@ async function main()
 
   await createRenderResources();
   await createPipelines();
+  setGrid(24);
 
   document.body.innerHTML = "<button>CLICK<canvas style='width:0;cursor:none'>";
   canvas = document.querySelector("canvas");
