@@ -1,13 +1,14 @@
 #!/bin/bash
 
-# Assumes wgslminify and js-payload-compress available in current dir
+if [ ! -e wgslminify ] || [ ! -e js-payload-compress ]; then
+  echo "Compression script needs wgslminify and js-payload-compress in current path!"
+  exit 1
+fi
 
 infile=$1
 infile_ext="${infile##*.}"
 infile_name="${infile%.*}"
-
 output_dir=output
-
 shader_excludes=$2
 
 rm -rf $output_dir
