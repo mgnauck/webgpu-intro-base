@@ -10,8 +10,7 @@ output_dir=output
 
 shader_excludes=$2
 
-echo $infile
-
+rm -rf $output_dir
 mkdir $output_dir
 cp $infile $output_dir
 
