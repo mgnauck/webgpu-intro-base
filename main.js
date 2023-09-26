@@ -8,7 +8,7 @@ const AUDIO_SHADER_FILE = "audio.wgsl";
 
 const IDLE = false;
 const RECORDING = false;
-const STOP_REPLAY_AT = 180;
+const STOP_REPLAY_AT = 320;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 1024; // Careful, this is also hardcoded in the shader!!
@@ -51,7 +51,6 @@ let context;
 let view = []; // radius, phi, theta
 let programmableValue;
 
-let seed;
 let rand;
 let gridRes;
 let updateDelay = DEFAULT_UPDATE_DELAY;
@@ -75,11 +74,11 @@ const RULES = [
   962072678154n, // pyro-10, key 3
   36507219973n, // framework-5, key 4
   96793530464266n, // spiky-10, key 5
-  1821066142730n, // builder-10, key 6
-  96793530462218n, // ripple-10, key 7
+  96793530462218n, // ripple-10, key 6
+  1821066142730n, // builder-10, key 7
   37688665960915591n, // shells-7, key 8
   30064771210n, // pulse-10, key 9
-  4294970885n, // more-builds-5, key )
+  4294970885n, // more-builds-5, key =
 ];
 
 const RULES_NAMES = [
@@ -90,29 +89,35 @@ const RULES_NAMES = [
   "pyro-10",
   "framework-5",
   "spiky-10",
-  "builder-10",
   "ripple-10",
-  "shells-7",
-  "pulse-10",
-  "more-builds-5",
+  "builder-10", // unused
+  "shells-7", // unused
+  "pulse-10", // unused
+  "more-builds-5", // unused
 ];
 
 const SIMULATION_EVENTS = [
-{ t: 0, r: 3, d: -0.320 },
-{ t: 40, r: 4, d: 0.320 },
-{ t: 60, r: 3, d: 0.05 },
-{ t: 80, r: 1, d: 0.125 },
-{ t: 120, r: 8, d: -0.130 },
-{ t: 180, r: -8 },
+{ t: 0, r: 3, d: -0.3 }, // amoeba
+{ t: 40, r: 4, d: 0.3 }, // pyro
+{ t: 60, r: 3, d: 0.1 }, // amoeba
+{ t: 80, r: 1, d: 0.375 }, // clouds
+{ t: 120, r: 7, d: -0.25 }, // ripple
+{ t: 160, r: 4 }, // pyro (trim down)
+{ t: 165, r: 5, d: -0.375 }, // framework
+{ t: 200, r: 6 }, // spiky
+{ t: 220, r: 2 }, // 445
 ];
 
 const CAMERA_EVENTS = [
-{ t: 0, v: [ 42, 1.5708, 0.0000 ] },
-{ t: 40, v: [ 320, -3.7292, 0.7250 ] },
-{ t: 60, v: [ 240, -4.4042, -0.7000 ] },
-{ t: 80, v: [ 200, -5.7792, 0.8000 ] },
-{ t: 120, v: [ 170, -2.7960, -0.7000 ] },
-{ t: 180, v: [ 220, -1.3600, 0.5000] },
+{ t: 0, v: [ 42, 1.5, -0.3 ] },
+{ t: 40, v: [ 320, -3.7292, 1.0 ] },
+{ t: 60, v: [ 220, -4.4042, -0.7 ] },
+{ t: 80, v: [ 180, -5.7792, 0.8 ] },
+{ t: 120, v: [ 160, -2.7960, -0.7 ] },
+{ t: 160, v: [ 180, -1.3600, 0.7] },
+{ t: 195, v: [ 160, 1.3, -0.2] },
+{ t: 220, v: [ 140, 3.1, -0.4] },
+{ t: 320, v: [ 180, -0.3, 0.7] },
 ];
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
@@ -439,7 +444,7 @@ function resetView()
   view = [gridRes * 0.5, Math.PI * 0.5, 0];
 }
 
-function setGrid(area)
+function setGrid(area, prob, seed)
 {
   for(let i=0; i<grid.length; i++)
     grid[i] = 0;
@@ -451,15 +456,15 @@ function setGrid(area)
   grid[2] = gridRes ** 2;
 
   const center = gridRes * 0.5;
-  const d = area * 0.5;
+  const d = Math.ceil(area / 2);
 
-  let rand = splitmix32(4079287172);
+  rand = splitmix32(seed);
 
   // TODO Make initial grid somewhat more interesting
   for(let k=center - d; k<center + d; k++)
     for(let j=center - d; j<center + d; j++)
       for(let i=center - d; i<center + d; i++)
-        grid[3 + (gridRes ** 2) * k + gridRes * j + i] = rand() > 0.6 ? 1 : 0;
+        grid[3 + (gridRes ** 2) * k + gridRes * j + i] =  rand() > prob ? 1 : 0;
 
   device.queue.writeBuffer(gridBuffer[0], 0, grid);
   device.queue.writeBuffer(gridBuffer[1], 0, grid);
@@ -526,6 +531,12 @@ async function handleKeyEvent(e)
     case "l":
       createPipelines();
       console.log("Visual shader reloaded");
+      break;
+    case "i":
+      let seed = rand() * 4294967296;
+      console.log("Initialized new grid with seed " + seed);
+      setGrid(22, 0.7, seed); // 
+      //setGrid(33, 0.7, seed); // 4088616368
       break;
     case "Enter":
       recording = !recording;
@@ -683,7 +694,7 @@ async function main()
 
   await createRenderResources();
   await createPipelines();
-  setGrid(24);
+  setGrid(24, 0.6, 4079287172);
 
   document.body.innerHTML = "<button>CLICK<canvas style='width:0;cursor:none'>";
   canvas = document.querySelector("canvas");
