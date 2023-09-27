@@ -8,7 +8,7 @@ const AUDIO_SHADER_FILE = "audio.wgsl";
 
 const IDLE = false;
 const RECORDING = false;
-const STOP_REPLAY_AT = 320;
+const STOP_REPLAY_AT = 350;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 1024; // Careful, this is also hardcoded in the shader!!
@@ -101,11 +101,12 @@ const SIMULATION_EVENTS = [
 { t: 40, r: 4, d: 0.3 }, // pyro
 { t: 60, r: 3, d: 0.1 }, // amoeba
 { t: 80, r: 1, d: 0.375 }, // clouds
-{ t: 120, r: 7, d: -0.25 }, // ripple
-{ t: 160, r: 4 }, // pyro (trim down)
-{ t: 165, r: 5, d: -0.375 }, // framework
-{ t: 200, r: 6 }, // spiky
-{ t: 220, r: 2 }, // 445
+{ t: 110, r: 7, d: -0.25 }, // ripple
+{ t: 150, r: 4, d: 0.125 }, // pyro (trim down)
+{ t: 155, r: 5, d: -0.625 }, // framework
+{ t: 190, r: 6 }, // spiky
+{ t: 220, r: 2, d: 0.125 }, // 445
+{ t: 290, r: 6 }, //
 ];
 
 const CAMERA_EVENTS = [
@@ -113,11 +114,12 @@ const CAMERA_EVENTS = [
 { t: 40, v: [ 320, -3.7292, 1.0 ] },
 { t: 60, v: [ 220, -4.4042, -0.7 ] },
 { t: 80, v: [ 180, -5.7792, 0.8 ] },
-{ t: 120, v: [ 160, -2.7960, -0.7 ] },
-{ t: 160, v: [ 180, -1.3600, 0.7] },
-{ t: 195, v: [ 160, 1.3, -0.2] },
+{ t: 110, v: [ 160, -2.7960, -0.5 ] },
+{ t: 150, v: [ 180, -1.3600, 0.7] },
+{ t: 190, v: [ 160, 1.3, -0.2] },
 { t: 220, v: [ 140, 3.1, -0.4] },
-{ t: 320, v: [ 180, -0.3, 0.7] },
+{ t: 290, v: [ 180, -0.3, 0.7] },
+{ t: 350, v: [ 160, 0.5, -0.2] },
 ];
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
