@@ -35,37 +35,43 @@ let activeRuleSet;
 let activeSimulationEventIndex = -1;
 let activeCameraEventIndex = -1;
 
+// TODO Test if direct bit fields are smaller than encoded
 const RULES = [
-  0, // not in use, leave it here, we need it for enable/disable magic
   2023103542460421n, // clouds-5, key 0
   34359738629n, // 4/4-5, key 1
   97240207056901n, // amoeba-5, key 2
   962072678154n, // pyro-10, key 3
   36507219973n, // framework-5, key 4
   96793530464266n, // spiky-10, key 5
-  1821066142730n, // builder-10, key 6
-  96793530462218n, // ripple-10, key 7
-  37688665960915591n, // shells-7, key 8
-  30064771210n, // pulse-10, key 9
-  4294970885n, // more-builds-5, key )
+  96793530462218n, // ripple-10, key 6
+  1821066142730n, // builder-10, key 7
 ];
 
+// Rule set indices are -1 in player compared to main!!
 const SIMULATION_EVENTS = [
-{ t: 0, r: 3, d: -0.320 },
-{ t: 40, r: 4, d: 0.320 },
-{ t: 60, r: 3, d: 0.05 },
-{ t: 80, r: 1, d: 0.125 },
-{ t: 120, r: 8, d: -0.130 },
-{ t: 180, r: -8 },
+{ t: 0, r: 2, d: -0.3 }, // amoeba
+{ t: 40, r: 3, d: 0.3 }, // pyro
+{ t: 60, r: 2, d: 0.1 }, // amoeba
+{ t: 80, r: 0, d: 0.375 }, // clouds
+{ t: 110, r: 6, d: -0.25 }, // ripple
+{ t: 150, r: 3, d: 0.125 }, // pyro (trim down)
+{ t: 155, r: 4, d: -0.625 }, // framework
+{ t: 190, r: 5 }, // spiky
+{ t: 220, r: 1, d: 0.125 }, // 445
 ];
 
+
+// TODO Merge with above array
 const CAMERA_EVENTS = [
-{ t: 0, v: [ 42, 1.5708, 0.0000 ] },
-{ t: 40, v: [ 320, -3.7292, 0.7250 ] },
-{ t: 60, v: [ 240, -4.4042, -0.7000 ] },
-{ t: 80, v: [ 200, -5.7792, 0.8000 ] },
-{ t: 120, v: [ 170, -2.7960, -0.7000 ] },
-{ t: 180, v: [ 220, -1.3600, 0.5000] },
+{ t: 0, p: 42 },
+{ t: 40, p: 320 },
+{ t: 60, p: 220 },
+{ t: 80, p: 180 },
+{ t: 110, p: 160 },
+{ t: 150, p: 180 },
+{ t: 190, p: 160 },
+{ t: 220, p: 140 },
+{ t: 300, p: 180 },
 ];
 
 const AUDIO_SHADER = `
@@ -268,14 +274,11 @@ function render(time)
   updateSimulation();
   updateCamera();
  
-  if(activeRuleSet > 0) {
-    if(timeInBeats - lastSimulationUpdateTime > updateDelay) {
-      encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], BUFFER_DIM / 4); 
-      simulationIteration++;
-      lastSimulationUpdateTime = (audioContext.currentTime - startTime) * BPM / 60;
-    }
-  } else
-    lastSimulationUpdateTime = timeInBeats;
+  if(timeInBeats - lastSimulationUpdateTime > updateDelay) {
+    encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], BUFFER_DIM / 4); 
+    simulationIteration++;
+    lastSimulationUpdateTime = (audioContext.currentTime - startTime) * BPM / 60;
+  }
 
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([...view, timeInBeats]));
 
@@ -294,8 +297,8 @@ function updateSimulation()
 
     // Rules
     if(e.r !== undefined) {
-      activeRuleSet = e.r; // Can be active (positive) or inactive (negative), zero is excluded by definition
-      let rulesBitsBigInt = RULES[Math.abs(activeRuleSet)];
+      activeRuleSet = e.r;
+      let rulesBitsBigInt = RULES[activeRuleSet];
       // State count (bit 0-3)
       rules[0] = Number(rulesBitsBigInt & BigInt(0xf));
       // Alive bits (4-31), birth bits (32-59)
@@ -318,8 +321,9 @@ function updateCamera()
     let curr = CAMERA_EVENTS[activeCameraEventIndex];
     let next = CAMERA_EVENTS[activeCameraEventIndex + 1];
     let t = (timeInBeats - curr.t) / (next.t - curr.t);
-    for(let i=0; i<3; i++)
-      view[i] = curr.v[i] + (next.v[i] - curr.v[i]) * t;
+    view[0] = curr.p + (next.p - curr.p) * t;
+    view[1] = ((activeCameraEventIndex % 2) ? 1 : -1) * t * 2 * Math.PI;
+    view[2] = (0.9 + 0.3 * Math.sin(timeInBeats * 0.2)) * Math.sin(timeInBeats * 0.05);
   }
 }
 
@@ -337,7 +341,6 @@ function setGrid(area)
 
   let rand = splitmix32(4079287172);
 
-  // TODO Make initial grid somewhat more interesting
   for(let k=center - d; k<center + d; k++)
     for(let j=center - d; j<center + d; j++)
       for(let i=center - d; i<center + d; i++)

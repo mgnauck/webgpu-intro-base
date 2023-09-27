@@ -8,12 +8,11 @@ const AUDIO_SHADER_FILE = "audio.wgsl";
 
 const IDLE = false;
 const RECORDING = false;
-const STOP_REPLAY_AT = 350;
+const STOP_REPLAY_AT = 330;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 1024; // Careful, this is also hardcoded in the shader!!
 const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
-const FOV = 50.0;
 
 const AUDIO_BUFFER_SIZE = 4096 * 4096;
 
@@ -48,7 +47,7 @@ let renderPassDescriptor;
 let canvas;
 let context;
 
-let view = []; // radius, phi, theta
+let view; // radius, phi, theta
 let programmableValue;
 
 let rand;
@@ -106,7 +105,6 @@ const SIMULATION_EVENTS = [
 { t: 155, r: 5, d: -0.625 }, // framework
 { t: 190, r: 6 }, // spiky
 { t: 220, r: 2, d: 0.125 }, // 445
-{ t: 290, r: 6 }, //
 ];
 
 const CAMERA_EVENTS = [
@@ -118,8 +116,7 @@ const CAMERA_EVENTS = [
 { t: 150, v: [ 180, -1.3600, 0.7] },
 { t: 190, v: [ 160, 1.3, -0.2] },
 { t: 220, v: [ 140, 3.1, -0.4] },
-{ t: 290, v: [ 180, -0.3, 0.7] },
-{ t: 350, v: [ 160, 0.5, -0.2] },
+{ t: 300, v: [ 180, -0.3, 0.7] },
 ];
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
@@ -436,8 +433,11 @@ function updateCamera()
     let curr = CAMERA_EVENTS[activeCameraEventIndex];
     let next = CAMERA_EVENTS[activeCameraEventIndex + 1];
     let t = (timeInBeats - curr.t) / (next.t - curr.t);
-    for(let i=0; i<3; i++)
-      view[i] = curr.v[i] + (next.v[i] - curr.v[i]) * t;
+    //for(let i=0; i<3; i++)
+    //  view[i] = curr.v[i] + (next.v[i] - curr.v[i]) * t;
+    view[0] = curr.v[0] + (next.v[0] - curr.v[0]) * t;
+    view[1] = ((activeCameraEventIndex % 2) ? 1 : -1) * t * 2 * Math.PI;
+    view[2] = (0.9 + 0.3 * Math.sin(timeInBeats * 0.2)) * Math.sin(timeInBeats * 0.05);
   }
 }
 
