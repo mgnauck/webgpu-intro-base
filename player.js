@@ -24,7 +24,6 @@ let context;
 
 let view = [];
 let grid = new Uint32Array(3 + (BUFFER_DIM ** 3));
-let rules = new Uint32Array(1 + 2 * 27);
 let updateDelay = 0.5;
 
 let startTime;
@@ -33,30 +32,28 @@ let lastSimulationUpdateTime = 0;
 let simulationIteration = 0;
 let activeScene = -1;
 
-// TODO Test if direct bit fields are smaller than encoded
-const RULES = [
-  2023103542460421n, // clouds-5, key 0
-  34359738629n, // 4/4-5, key 1
-  97240207056901n, // amoeba-5, key 2
-  962072678154n, // pyro-10, key 3
-  36507219973n, // framework-5, key 4
-  96793530464266n, // spiky-10, key 5
-  96793530462218n, // ripple-10, key 6
-  1821066142730n, // builder-10, key 7
-];
+const RULES = new Uint32Array([
+   5,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,1,1,0,0,0,0,0,0,0, // clouds-5
+   5,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // 4/4-5
+   5,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,1,1,1,0,0,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0, // amoeba-5
+  10,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // pyro-10
+   5,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // framework-5
+  10,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,0,0,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0, // spiky-10
+  10,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,0,0,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0, // ripple-10
+]);
 
 // Rule set indices are -1 in player compared to main!!
 const SCENES = [
-{ t: 0, r: 2, d: -0.3, p: 42 }, // amoeba
-{ t: 40, r: 3, d: 0.3, p: 320 }, // pyro
-{ t: 60, r: 2, d: 0.1, p: 220 }, // amoeba
-{ t: 80, r: 0, d: 0.375, p: 180  }, // clouds
-{ t: 110, r: 6, d: -0.25, p: 160 }, // ripple
-{ t: 150, r: 3, d: 0.125, p: 180 }, // pyro (trim down)
-{ t: 155, r: 4, d: -0.625, p: 170 }, // framework
-{ t: 190, r: 5, p: 160 }, // spiky
-{ t: 220, r: 1, d: 0.125, p: 140 }, // 445
-{ t: 300, p: 180 }
+  { t: 0, r: 2, d: -0.3, p: 42 }, // amoeba
+  { t: 40, r: 3, d: 0.3, p: 320 }, // pyro
+  { t: 60, r: 2, d: 0.1, p: 220 }, // amoeba
+  { t: 80, r: 0, d: 0.375, p: 180  }, // clouds
+  { t: 110, r: 6, d: -0.25, p: 160 }, // ripple
+  { t: 150, r: 3, d: 0.125, p: 180 }, // pyro (trim down)
+  { t: 155, r: 4, d: -0.625, p: 170 }, // framework
+  { t: 190, r: 5, p: 160 }, // spiky
+  { t: 220, r: 1, d: 0.125, p: 140 }, // 445
+  { t: 300, p: 180 }
 ];
 
 const AUDIO_SHADER = `
@@ -206,7 +203,7 @@ async function createRenderResources()
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   rulesBuffer = device.createBuffer({
-    size: rules.length * 4,
+    size: RULES.length * 4,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   for(let i=0; i<2; i++) {
@@ -279,23 +276,12 @@ function update()
   if(activeScene + 1 < SCENES.length) {
     if(timeInBeats >= SCENES[activeScene + 1].t) {
       let s = SCENES[++activeScene];
-
-      // Rules
-      if(s.r !== undefined) {
-        let rulesBitsBigInt = RULES[s.r];
-        // State count (bit 0-3)
-        rules[0] = Number(rulesBitsBigInt & BigInt(0xf));
-        // Alive bits (4-31), birth bits (32-59)
-        for(let i=0; i<rules.length - 1; i++)
-          rules[1 + i] = Number((rulesBitsBigInt >> BigInt(4 + i)) & BigInt(0x1));
-        device.queue.writeBuffer(rulesBuffer, 0, rules);
-      }
-
-      // Time
-      updateDelay = (s.d === undefined) ? updateDelay : updateDelay + s.d;
+      if(s.r !== undefined)
+        device.queue.writeBuffer(rulesBuffer, 0, RULES, s.r * 55, 55);
+      if(s.d !== undefined)
+        updateDelay += s.d;
     }
 
-    // Camera
     let curr = SCENES[activeScene];
     let next = SCENES[activeScene + 1];
     let t = (timeInBeats - curr.t) / (next.t - curr.t);

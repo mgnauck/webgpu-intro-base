@@ -54,7 +54,6 @@ let rand;
 let gridRes;
 let updateDelay = DEFAULT_UPDATE_DELAY;
 let grid;
-let rules;
 
 let startTime;
 let timeInBeats = 0;
@@ -63,20 +62,19 @@ let simulationIteration = 0;
 let activeRuleSet = 3;
 let activeScene = -1;
 
-const RULES = [
-  0, // not in use, leave it here, we need it for enable/disable magic
-  2023103542460421n, // clouds-5, key 0
-  34359738629n, // 4/4-5, key 1
-  97240207056901n, // amoeba-5, key 2
-  962072678154n, // pyro-10, key 3
-  36507219973n, // framework-5, key 4
-  96793530464266n, // spiky-10, key 5
-  96793530462218n, // ripple-10, key 6
-  1821066142730n, // builder-10, key 7
-  37688665960915591n, // shells-7, key 8
-  30064771210n, // pulse-10, key 9
-  4294970885n, // more-builds-5, key =
-];
+const RULES = new Uint32Array([
+   5,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,1,1,0,0,0,0,0,0,0, // clouds-5
+   5,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // 4/4-5
+   5,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,1,1,1,0,0,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0, // amoeba-5
+  10,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // pyro-10
+   5,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // framework-5
+  10,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,0,0,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0, // spiky-10
+  10,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,0,0,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0, // ripple-10
+  10,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // builder-10, unused
+  7,0,0,0,1,0,1,0,0,0,1,0,1,0,0,0,1,0,1,0,1,0,1,0,1,1,0,1,0,0,0,1,0,0,1,0,1,1,0,1,0,0,1,1,1,1,0,1,0,0,0,0,1,0,0, // shells-7, unused
+  10,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // pulse-10, unused
+  5,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // more-builds-5, unused
+]);
 
 const RULES_NAMES = [
   "U-N-U-S-E-D",
@@ -299,7 +297,7 @@ async function createRenderResources()
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   rulesBuffer = device.createBuffer({
-    size: rules.length * 4,
+    size: RULES.length * 4,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   for(let i=0; i<2; i++) {
@@ -459,18 +457,9 @@ function setGrid(area, prob, seed)
 function setRules(r)
 {
   activeRuleSet = r; // Can be active (positive) or inactive (negative), zero is excluded by definition
+  
+  device.queue.writeBuffer(rulesBuffer, 0, RULES, (Math.abs(activeRuleSet) - 1) * 55, 55);
  
-  let rulesBitsBigInt = RULES[Math.abs(activeRuleSet)];
-  
-  // State count (bit 0-3)
-  rules[0] = Number(rulesBitsBigInt & BigInt(0xf));
-  
-  // Alive bits (4-31), birth bits (32-59)
-  for(let i=0; i<rules.length - 1; i++)
-    rules[1 + i] = Number((rulesBitsBigInt >> BigInt(4 + i)) & BigInt(0x1));
-  
-  device.queue.writeBuffer(rulesBuffer, 0, rules);
-  
   recordRulesEvent(r);
 }
 
@@ -669,12 +658,10 @@ async function main()
   // Grid mul + grid
   grid = new Uint32Array(3 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
   
-  // State count + alive rules + birth rules
-  rules = new Uint32Array(1 + 2 * 27);
-
   await createRenderResources();
   await createPipelines();
   setGrid(24, 0.6, 4079287172);
+
   if(idle || recording)
     resetView();
   update();
