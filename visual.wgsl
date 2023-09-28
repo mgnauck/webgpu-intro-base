@@ -30,7 +30,7 @@ struct Hit
 }
 
 const WIDTH = 1024;
-const HEIGHT = WIDTH / 1.6;
+const HEIGHT = WIDTH / 1.77;
 const EPSILON = 0.001;
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
