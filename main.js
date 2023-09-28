@@ -8,7 +8,7 @@ const AUDIO_SHADER_FILE = "audio.wgsl";
 
 const IDLE = false;
 const RECORDING = false;
-const STOP_REPLAY_AT = 330;
+const STOP_REPLAY_AT = 300;
 
 const ASPECT = 1.6;
 const CANVAS_WIDTH = 1024; // Careful, this is also hardcoded in the shader!!
@@ -108,15 +108,15 @@ const SIMULATION_EVENTS = [
 ];
 
 const CAMERA_EVENTS = [
-{ t: 0, v: [ 42, 1.5, -0.3 ] },
-{ t: 40, v: [ 320, -3.7292, 1.0 ] },
-{ t: 60, v: [ 220, -4.4042, -0.7 ] },
-{ t: 80, v: [ 180, -5.7792, 0.8 ] },
-{ t: 110, v: [ 160, -2.7960, -0.5 ] },
-{ t: 150, v: [ 180, -1.3600, 0.7] },
-{ t: 190, v: [ 160, 1.3, -0.2] },
-{ t: 220, v: [ 140, 3.1, -0.4] },
-{ t: 300, v: [ 180, -0.3, 0.7] },
+{ t: 0, p: 42 },
+{ t: 40, p: 320 },
+{ t: 60, p: 220 },
+{ t: 80, p: 180 },
+{ t: 110, p: 160 },
+{ t: 150, p: 180 },
+{ t: 190, p: 160 },
+{ t: 220, p: 140 },
+{ t: 300, p: 180 },
 ];
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
@@ -433,9 +433,11 @@ function updateCamera()
     let curr = CAMERA_EVENTS[activeCameraEventIndex];
     let next = CAMERA_EVENTS[activeCameraEventIndex + 1];
     let t = (timeInBeats - curr.t) / (next.t - curr.t);
+    // Lerp all camera params
     //for(let i=0; i<3; i++)
     //  view[i] = curr.v[i] + (next.v[i] - curr.v[i]) * t;
-    view[0] = curr.v[0] + (next.v[0] - curr.v[0]) * t;
+    // Only lerp radius
+    view[0] = curr.p + (next.p - curr.p) * t;
     view[1] = ((activeCameraEventIndex % 2) ? 1 : -1) * t * 2 * Math.PI;
     view[2] = (0.9 + 0.3 * Math.sin(timeInBeats * 0.2)) * Math.sin(timeInBeats * 0.05);
   }
@@ -507,9 +509,9 @@ function recordTimeEvent(d)
   console.log(`{ t: ${timeInBeats.toFixed(2)}, d: ${d.toFixed(2)} }, // updateDelay: ${updateDelay.toFixed(3)}`);
 }
 
-function recordCameraEvent(v)
+function recordCameraEvent()
 {
-  console.log(`{ t: ${timeInBeats.toFixed(2)}, v: [ ${v[0].toFixed(1)}, ${v[1].toFixed(4)}, ${v[2].toFixed(4)} ] },`);
+  console.log(`{ t: ${timeInBeats.toFixed(2)}, p: ${view[0].toFixed(1)} },`);
 }
 
 async function handleKeyEvent(e)
@@ -567,7 +569,7 @@ async function handleKeyEvent(e)
       setRules(-activeRuleSet); // Enable or disable activity of current rule set (pos/neg)
       break;
     case ".":
-      recordCameraEvent(view); 
+      recordCameraEvent();
       break;
     case ">":
       // Re-render and restart audio from last audio position
