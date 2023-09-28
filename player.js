@@ -31,9 +31,7 @@ let startTime;
 let timeInBeats = 0;
 let lastSimulationUpdateTime = 0;
 let simulationIteration = 0;
-let activeRuleSet;
-let activeSimulationEventIndex = -1;
-let activeCameraEventIndex = -1;
+let activeScene = -1;
 
 // TODO Test if direct bit fields are smaller than encoded
 const RULES = [
@@ -48,30 +46,17 @@ const RULES = [
 ];
 
 // Rule set indices are -1 in player compared to main!!
-const SIMULATION_EVENTS = [
-{ t: 0, r: 2, d: -0.3 }, // amoeba
-{ t: 40, r: 3, d: 0.3 }, // pyro
-{ t: 60, r: 2, d: 0.1 }, // amoeba
-{ t: 80, r: 0, d: 0.375 }, // clouds
-{ t: 110, r: 6, d: -0.25 }, // ripple
-{ t: 150, r: 3, d: 0.125 }, // pyro (trim down)
-{ t: 155, r: 4, d: -0.625 }, // framework
-{ t: 190, r: 5 }, // spiky
-{ t: 220, r: 1, d: 0.125 }, // 445
-];
-
-
-// TODO Merge with above array
-const CAMERA_EVENTS = [
-{ t: 0, p: 42 },
-{ t: 40, p: 320 },
-{ t: 60, p: 220 },
-{ t: 80, p: 180 },
-{ t: 110, p: 160 },
-{ t: 150, p: 180 },
-{ t: 190, p: 160 },
-{ t: 220, p: 140 },
-{ t: 300, p: 180 },
+const SCENES = [
+{ t: 0, r: 2, d: -0.3, p: 42 }, // amoeba
+{ t: 40, r: 3, d: 0.3, p: 320 }, // pyro
+{ t: 60, r: 2, d: 0.1, p: 220 }, // amoeba
+{ t: 80, r: 0, d: 0.375, p: 180  }, // clouds
+{ t: 110, r: 6, d: -0.25, p: 160 }, // ripple
+{ t: 150, r: 3, d: 0.125, p: 180 }, // pyro (trim down)
+{ t: 155, r: 4, d: -0.625, p: 170 }, // framework
+{ t: 190, r: 5, p: 160 }, // spiky
+{ t: 220, r: 1, d: 0.125, p: 140 }, // 445
+{ t: 300, p: 180 }
 ];
 
 const AUDIO_SHADER = `
@@ -271,8 +256,7 @@ function render(time)
 
   const commandEncoder = device.createCommandEncoder();
   
-  updateSimulation();
-  updateCamera();
+  update();
  
   if(timeInBeats - lastSimulationUpdateTime > updateDelay) {
     encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], BUFFER_DIM / 4); 
@@ -290,39 +274,33 @@ function render(time)
   requestAnimationFrame(render);
 }
 
-function updateSimulation()
+function update()
 {
-  if(activeSimulationEventIndex + 1 < SIMULATION_EVENTS.length && timeInBeats >= SIMULATION_EVENTS[activeSimulationEventIndex + 1].t) {
-    let e = SIMULATION_EVENTS[++activeSimulationEventIndex];
+  if(activeScene + 1 < SCENES.length) {
+    if(timeInBeats >= SCENES[activeScene + 1].t) {
+      let s = SCENES[++activeScene];
 
-    // Rules
-    if(e.r !== undefined) {
-      activeRuleSet = e.r;
-      let rulesBitsBigInt = RULES[activeRuleSet];
-      // State count (bit 0-3)
-      rules[0] = Number(rulesBitsBigInt & BigInt(0xf));
-      // Alive bits (4-31), birth bits (32-59)
-      for(let i=0; i<rules.length - 1; i++)
-        rules[1 + i] = Number((rulesBitsBigInt >> BigInt(4 + i)) & BigInt(0x1));
-      device.queue.writeBuffer(rulesBuffer, 0, rules);
+      // Rules
+      if(s.r !== undefined) {
+        let rulesBitsBigInt = RULES[s.r];
+        // State count (bit 0-3)
+        rules[0] = Number(rulesBitsBigInt & BigInt(0xf));
+        // Alive bits (4-31), birth bits (32-59)
+        for(let i=0; i<rules.length - 1; i++)
+          rules[1 + i] = Number((rulesBitsBigInt >> BigInt(4 + i)) & BigInt(0x1));
+        device.queue.writeBuffer(rulesBuffer, 0, rules);
+      }
+
+      // Time
+      updateDelay = (s.d === undefined) ? updateDelay : updateDelay + s.d;
     }
 
-    // Time
-    updateDelay = (e.d === undefined) ? updateDelay : updateDelay + e.d;
-  }
-}
-
-function updateCamera()
-{
-  if(activeCameraEventIndex + 1 < CAMERA_EVENTS.length && timeInBeats >= CAMERA_EVENTS[activeCameraEventIndex + 1].t)
-    ++activeCameraEventIndex;
-
-  if(activeCameraEventIndex >= 0 && activeCameraEventIndex + 1 < CAMERA_EVENTS.length) {
-    let curr = CAMERA_EVENTS[activeCameraEventIndex];
-    let next = CAMERA_EVENTS[activeCameraEventIndex + 1];
+    // Camera
+    let curr = SCENES[activeScene];
+    let next = SCENES[activeScene + 1];
     let t = (timeInBeats - curr.t) / (next.t - curr.t);
     view[0] = curr.p + (next.p - curr.p) * t;
-    view[1] = ((activeCameraEventIndex % 2) ? 1 : -1) * t * 2 * Math.PI;
+    view[1] = ((activeScene % 2) ? 1 : -1) * t * 2 * Math.PI;
     view[2] = (0.9 + 0.3 * Math.sin(timeInBeats * 0.2)) * Math.sin(timeInBeats * 0.05);
   }
 }
@@ -364,8 +342,6 @@ function startRender()
     canvas.style.top = 0;
   }
 
-  updateSimulation();
-  updateCamera();
   requestAnimationFrame(render);
 }
 
@@ -380,6 +356,7 @@ async function main()
   await createAudioResources();
   await createRenderResources();
   setGrid(24);
+  update();
 
   document.body.innerHTML = "<button>CLICK<canvas style='width:0;cursor:none'>";
   canvas = document.querySelector("canvas");

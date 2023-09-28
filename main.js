@@ -47,7 +47,7 @@ let renderPassDescriptor;
 let canvas;
 let context;
 
-let view; // radius, phi, theta
+let view = []; // radius, phi, theta
 let programmableValue;
 
 let rand;
@@ -60,10 +60,8 @@ let startTime;
 let timeInBeats = 0;
 let lastSimulationUpdateTime = 0;
 let simulationIteration = 0;
-let gridBufferUpdateOffset = 0;
 let activeRuleSet = 3;
-let activeSimulationEventIndex = -1;
-let activeCameraEventIndex = -1;
+let activeScene = -1;
 
 const RULES = [
   0, // not in use, leave it here, we need it for enable/disable magic
@@ -95,28 +93,18 @@ const RULES_NAMES = [
   "more-builds-5", // unused
 ];
 
-const SIMULATION_EVENTS = [
-{ t: 0, r: 3, d: -0.3 }, // amoeba
-{ t: 40, r: 4, d: 0.3 }, // pyro
-{ t: 60, r: 3, d: 0.1 }, // amoeba
-{ t: 80, r: 1, d: 0.375 }, // clouds
-{ t: 110, r: 7, d: -0.25 }, // ripple
-{ t: 150, r: 4, d: 0.125 }, // pyro (trim down)
-{ t: 155, r: 5, d: -0.625 }, // framework
-{ t: 190, r: 6 }, // spiky
-{ t: 220, r: 2, d: 0.125 }, // 445
-];
-
-const CAMERA_EVENTS = [
-{ t: 0, p: 42 },
-{ t: 40, p: 320 },
-{ t: 60, p: 220 },
-{ t: 80, p: 180 },
-{ t: 110, p: 160 },
-{ t: 150, p: 180 },
-{ t: 190, p: 160 },
-{ t: 220, p: 140 },
-{ t: 300, p: 180 },
+// Rule set indices are +1 in main compared to player!!
+const SCENES = [
+{ t: 0, r: 3, d: -0.3, p: 42 }, // amoeba
+{ t: 40, r: 4, d: 0.3, p: 320 }, // pyro
+{ t: 60, r: 3, d: 0.1, p: 220 }, // amoeba
+{ t: 80, r: 1, d: 0.375, p: 180  }, // clouds
+{ t: 110, r: 7, d: -0.25, p: 160 }, // ripple
+{ t: 150, r: 4, d: 0.125, p: 180 }, // pyro (trim down)
+{ t: 155, r: 5, d: -0.625, p: 170 }, // framework
+{ t: 190, r: 6, p: 160 }, // spiky
+{ t: 220, r: 2, d: 0.125, p: 140 }, // 445
+{ t: 300, p: 180 }
 ];
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
@@ -376,8 +364,7 @@ function render(time)
   const commandEncoder = device.createCommandEncoder();
   
   if(!idle && !recording) {
-    updateSimulation();
-    updateCamera();
+    update();
   }
 
   if(!idle && activeRuleSet > 0) {
@@ -413,32 +400,27 @@ function setPerformanceTimer(timerName)
     });
 }
 
-function updateSimulation()
+function update()
 {
-  if(activeSimulationEventIndex + 1 < SIMULATION_EVENTS.length && timeInBeats >= SIMULATION_EVENTS[activeSimulationEventIndex + 1].t) {
-    let e = SIMULATION_EVENTS[++activeSimulationEventIndex];
-    if(e.r !== undefined)
-      setRules(e.r);
-    if(e.d !== undefined)
-      setTime(e.d);
-  }
-}
+  if(activeScene + 1 < SCENES.length) {
+    if(timeInBeats >= SCENES[activeScene + 1].t) {
+      let s = SCENES[++activeScene];
+    
+      if(s.r !== undefined)
+        setRules(s.r);
+    
+      if(s.d !== undefined)
+        setTime(s.d);
 
-function updateCamera()
-{
-  if(activeCameraEventIndex + 1 < CAMERA_EVENTS.length && timeInBeats >= CAMERA_EVENTS[activeCameraEventIndex + 1].t)
-    recordCameraEvent(CAMERA_EVENTS[++activeCameraEventIndex].v);
+      view[0] = s.p;
+      recordCameraEvent();
+    }
 
-  if(activeCameraEventIndex >= 0 && activeCameraEventIndex + 1 < CAMERA_EVENTS.length) {
-    let curr = CAMERA_EVENTS[activeCameraEventIndex];
-    let next = CAMERA_EVENTS[activeCameraEventIndex + 1];
+    let curr = SCENES[activeScene];
+    let next = SCENES[activeScene + 1];
     let t = (timeInBeats - curr.t) / (next.t - curr.t);
-    // Lerp all camera params
-    //for(let i=0; i<3; i++)
-    //  view[i] = curr.v[i] + (next.v[i] - curr.v[i]) * t;
-    // Only lerp radius
     view[0] = curr.p + (next.p - curr.p) * t;
-    view[1] = ((activeCameraEventIndex % 2) ? 1 : -1) * t * 2 * Math.PI;
+    view[1] = ((activeScene % 2) ? 1 : -1) * t * 2 * Math.PI;
     view[2] = (0.9 + 0.3 * Math.sin(timeInBeats * 0.2)) * Math.sin(timeInBeats * 0.05);
   }
 }
@@ -588,10 +570,8 @@ async function handleKeyEvent(e)
       timeInBeats = 0;
       lastSimulationUpdateTime = 0;
       simulationIteration = 0;
-      gridBufferUpdateOffset = 0;
       activeRuleSet = 3;
-      activeSimulationEventIndex = -1;
-      activeCameraEventIndex = -1;
+      activeScene = -1;
       if(AUDIO && !idle)
         await playAudio();
       break;
@@ -633,10 +613,6 @@ async function startRender()
     canvas.style.left = 0;
     canvas.style.top = 0;
   }
-
-  updateSimulation();
-  resetView(); // In case we have no camera, i.e. when recording
-  updateCamera();
 
   document.querySelector("button").removeEventListener("click", startRender);
 
@@ -699,7 +675,10 @@ async function main()
   await createRenderResources();
   await createPipelines();
   setGrid(24, 0.6, 4079287172);
-
+  if(idle || recording)
+    resetView();
+  update();
+ 
   document.body.innerHTML = "<button>CLICK<canvas style='width:0;cursor:none'>";
   canvas = document.querySelector("canvas");
   canvas.width = CANVAS_WIDTH;
