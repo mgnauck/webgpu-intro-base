@@ -22,8 +22,6 @@ let renderPassDescriptor;
 let canvas;
 let context;
 
-let grid = new Uint32Array(3 + (BUFFER_DIM ** 3));
-
 let startTime;
 let timeInBeats = 0;
 let lastSimulationUpdateTime = 0;
@@ -199,7 +197,7 @@ async function createRenderResources()
 
   for(let i=0; i<2; i++)
     gridBuffer[i] = device.createBuffer({
-      size: grid.length * 4,
+      size: (3 + (BUFFER_DIM ** 3)) * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   rulesBuffer = device.createBuffer({
@@ -291,6 +289,9 @@ function render(time)
 
 function setGrid(area)
 {
+  let rand = xorshift32(4079287172);
+  let grid = new Uint32Array(3 + (BUFFER_DIM ** 3));
+
   for(let i=0; i<grid.length; i++)
     grid[i] = 0;
 
@@ -301,8 +302,6 @@ function setGrid(area)
   const center = BUFFER_DIM * 0.5;
   const d = area * 0.5;
 
-  let rand = xorshift32(4079287172);
-  
   for(let k=center - d; k<center + d; k++)
     for(let j=center - d; j<center + d; j++)
       for(let i=center - d; i<center + d; i++)
@@ -310,7 +309,21 @@ function setGrid(area)
 
   device.queue.writeBuffer(gridBuffer[0], 0, grid);
   device.queue.writeBuffer(gridBuffer[1], 0, grid);
+
+  /*// TODO Try this for size, once grid mul is completely moved out of javascript and hardocded in shader
+  const pos = BUFFER_DIM / 2 - area / 2;
+  for(let k=0; k<area; k++) {
+    for(let j=0; j<area; j++) { 
+      let grid = new Uint32Array(area);
+      for(let i=0; i<area; i++)
+        grid[i] = rand() > 0.6 ? 1 : 0;
+      let ofs = (BUFFER_DIM ** 2) * (pos + k) + BUFFER_DIM * (pos + j) + pos;
+      device.queue.writeBuffer(gridBuffer[0], ofs, grid);
+      device.queue.writeBuffer(gridBuffer[1], ofs, grid);
+    }
+  }*/
 }
+ 
 
 function startRender()
 {
