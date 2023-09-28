@@ -105,12 +105,14 @@ const SCENES = [
 ];
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
-function splitmix32(a) {
-  return function() {
-    a |= 0; a = a + 0x9e3779b9 | 0;
-    var t = a ^ a >>> 16; t = Math.imul(t, 0x21f0aaad);
-    t = t ^ t >>> 15; t = Math.imul(t, 0x735a2d97);
-    return ((t = t ^ t >>> 15) >>> 0) / 4294967296;
+function xorshift32(a)
+{
+  return function()
+  {
+    a ^= a << 13;
+    a ^= a >>> 17;
+    a ^= a << 5;
+    return (a >>> 0) / 4294967296;
   }
 }
 
@@ -441,7 +443,7 @@ function setGrid(area, prob, seed)
   const center = gridRes * 0.5;
   const d = Math.ceil(area / 2);
 
-  rand = splitmix32(seed);
+  rand = xorshift32(seed);
 
   // TODO Make initial grid somewhat more interesting
   for(let k=center - d; k<center + d; k++)

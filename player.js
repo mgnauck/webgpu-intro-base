@@ -22,7 +22,6 @@ let renderPassDescriptor;
 let canvas;
 let context;
 
-let view = [];
 let grid = new Uint32Array(3 + (BUFFER_DIM ** 3));
 
 let startTime;
@@ -64,12 +63,14 @@ REPLACE_ME_VISUAL
 `;
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
-function splitmix32(a) {
-  return function() {
-    a |= 0; a = a + 0x9e3779b9 | 0;
-    var t = a ^ a >>> 16; t = Math.imul(t, 0x21f0aaad);
-    t = t ^ t >>> 15; t = Math.imul(t, 0x735a2d97);
-    return ((t = t ^ t >>> 15) >>> 0) / 4294967296;
+function xorshift32(a)
+{
+  return function()
+  {
+    a ^= a << 13;
+    a ^= a >>> 17;
+    a ^= a << 5;
+    return (a >>> 0) / 4294967296;
   }
 }
 
@@ -300,8 +301,8 @@ function setGrid(area)
   const center = BUFFER_DIM * 0.5;
   const d = area * 0.5;
 
-  let rand = splitmix32(4079287172);
-
+  let rand = xorshift32(4079287172);
+  
   for(let k=center - d; k<center + d; k++)
     for(let j=center - d; j<center + d; j++)
       for(let i=center - d; i<center + d; i++)
