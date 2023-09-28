@@ -17,7 +17,6 @@ const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 const AUDIO_BUFFER_SIZE = 4096 * 4096;
 
 const MAX_GRID_RES = 256;
-const DEFAULT_UPDATE_DELAY = 0.5;
 
 const MOVE_VELOCITY = 0.75;
 const LOOK_VELOCITY = 0.025;
@@ -52,7 +51,7 @@ let programmableValue;
 
 let rand;
 let gridRes;
-let updateDelay = DEFAULT_UPDATE_DELAY;
+let updateDelay;
 let grid;
 
 let startTime;
@@ -93,16 +92,16 @@ const RULES_NAMES = [
 
 // Rule set indices are +1 in main compared to player!!
 const SCENES = [
-{ t: 0, r: 3, d: -0.3, p: 42 }, // amoeba
-{ t: 40, r: 4, d: 0.3, p: 320 }, // pyro
-{ t: 60, r: 3, d: 0.1, p: 220 }, // amoeba
-{ t: 80, r: 1, d: 0.375, p: 180  }, // clouds
-{ t: 110, r: 7, d: -0.25, p: 160 }, // ripple
-{ t: 150, r: 4, d: 0.125, p: 180 }, // pyro (trim down)
-{ t: 155, r: 5, d: -0.625, p: 170 }, // framework
-{ t: 190, r: 6, p: 160 }, // spiky
-{ t: 220, r: 2, d: 0.125, p: 140 }, // 445
-{ t: 300, p: 180 }
+  { t: 0, r: 3, d: 0.2, p: 40 }, // amoeba
+  { t: 40, r: 4, d: 0.5, p: 320 }, // pyro
+  { t: 60, r: 3, d: 0.6, p: 220 }, // amoeba
+  { t: 80, r: 1, d: 1.0, p: 180  }, // clouds
+  { t: 110, r: 7, d: 0.75, p: 160 }, // ripple
+  { t: 150, r: 4, d: 0.875, p: 180 }, // pyro (trim down)
+  { t: 155, r: 3, d: 0.25, p: 170 }, // framework
+  { t: 190, r: 4, d: 0.25, p: 160 }, // spiky
+  { t: 220, r: 2, d: 0.375, p: 140 }, // 445
+  { t: 300, r: 2, d: 0.375, p: 180 }
 ];
 
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md
@@ -465,7 +464,7 @@ function setRules(r)
 
 function setTime(d)
 {
-  updateDelay += d;
+  updateDelay = d;
   
   recordTimeEvent(d);
 }
@@ -477,7 +476,7 @@ function recordRulesEvent(r)
 
 function recordTimeEvent(d)
 {
-  console.log(`{ t: ${timeInBeats.toFixed(2)}, d: ${d.toFixed(2)} }, // updateDelay: ${updateDelay.toFixed(3)}`);
+  console.log(`{ t: ${timeInBeats.toFixed(2)}, d: ${d.toFixed(2)} },`);
 }
 
 function recordCameraEvent()
@@ -510,8 +509,7 @@ async function handleKeyEvent(e)
     case "i":
       let seed = rand() * 4294967296;
       console.log("Initialized new grid with seed " + seed);
-      setGrid(22, 0.7, seed); // 
-      //setGrid(33, 0.7, seed); // 4088616368
+      setGrid(22, 0.7, seed);
       break;
     case "Enter":
       recording = !recording;
@@ -530,11 +528,11 @@ async function handleKeyEvent(e)
       console.log("Idle mode " + (idle ? "enabled" : "disabled") + ", time: " + timeInBeats);
       break;
     case "+":
-      setTime(0.25);
+      setTime(updateDelay + 0.25);
       break;
     case "-":
       if(updateDelay > 0)
-        setTime(-0.25);
+        setTime(updateDelay - 0.25);
       break;
     case "#":
       setRules(-activeRuleSet); // Enable or disable activity of current rule set (pos/neg)
@@ -554,7 +552,6 @@ async function handleKeyEvent(e)
           await suspendAudio();
         await renderAudio();
       }
-      updateDelay = DEFAULT_UPDATE_DELAY;
       startTime = undefined;
       timeInBeats = 0;
       lastSimulationUpdateTime = 0;

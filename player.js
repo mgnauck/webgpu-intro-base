@@ -24,7 +24,6 @@ let context;
 
 let view = [];
 let grid = new Uint32Array(3 + (BUFFER_DIM ** 3));
-let updateDelay = 0.5;
 
 let startTime;
 let timeInBeats = 0;
@@ -44,16 +43,16 @@ const RULES = new Uint32Array([
 
 // Rule set indices are -1 in player compared to main!!
 const SCENES = [
-  { t: 0, r: 2, d: -0.3, p: 42 }, // amoeba
-  { t: 40, r: 3, d: 0.3, p: 320 }, // pyro
-  { t: 60, r: 2, d: 0.1, p: 220 }, // amoeba
-  { t: 80, r: 0, d: 0.375, p: 180  }, // clouds
-  { t: 110, r: 6, d: -0.25, p: 160 }, // ripple
-  { t: 150, r: 3, d: 0.125, p: 180 }, // pyro (trim down)
-  { t: 155, r: 4, d: -0.625, p: 170 }, // framework
-  { t: 190, r: 5, p: 160 }, // spiky
-  { t: 220, r: 1, d: 0.125, p: 140 }, // 445
-  { t: 300, p: 180 }
+  { t: 0, r: 2, d: 0.2, p: 40 }, // amoeba
+  { t: 40, r: 3, d: 0.5, p: 320 }, // pyro
+  { t: 60, r: 2, d: 0.6, p: 220 }, // amoeba
+  { t: 80, r: 0, d: 1.0, p: 180  }, // clouds
+  { t: 110, r: 6, d: 0.75, p: 160 }, // ripple
+  { t: 150, r: 3, d: 0.875, p: 180 }, // pyro (trim down)
+  { t: 155, r: 4, d: 0.25, p: 170 }, // framework
+  { t: 190, r: 5, d: 0.25, p: 160 }, // spiky
+  { t: 220, r: 1, d: 0.375, p: 140 }, // 445
+  { t: 300, r: 1, d: 0.375, p: 180 }
 ];
 
 const AUDIO_SHADER = `
@@ -244,51 +243,49 @@ function render(time)
   }
   last = performance.now();
 
+  // Initialize time and start audio
   if(startTime === undefined) {
     audioBufferSourceNode.start(0, 0);
     startTime = audioContext.currentTime;
   }
 
+  // Current time
   timeInBeats = (audioContext.currentTime - startTime) * BPM / 60;
+  if(timeInBeats >= SCENES.at(-1).t)
+    return;
+
+  // Scene update
+  if(timeInBeats >= SCENES[activeScene + 1].t)
+    device.queue.writeBuffer(rulesBuffer, 0, RULES, SCENES[ ++activeScene ].r * 55, 55);
+
+  // Current scene time
+  let curr = SCENES[activeScene];
+  let next = SCENES[activeScene + 1];
+  let t = (timeInBeats - curr.t) / (next.t - curr.t);
 
   const commandEncoder = device.createCommandEncoder();
   
-  update();
- 
-  if(timeInBeats - lastSimulationUpdateTime > updateDelay) {
+  // Simulation
+  if(timeInBeats - lastSimulationUpdateTime > SCENES[activeScene].d) {
     encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], BUFFER_DIM / 4); 
     simulationIteration++;
     lastSimulationUpdateTime = (audioContext.currentTime - startTime) * BPM / 60;
   }
 
-  device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([...view, timeInBeats]));
+  // Camera
+  device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
+    curr.p + (next.p - curr.p) * t, // radius
+    ((activeScene % 2) ? 1 : -1) * t * 2 * Math.PI, // phi
+    (0.9 + 0.3 * Math.sin(timeInBeats * 0.2)) * Math.sin(timeInBeats * 0.05), // theta
+    timeInBeats]));
 
+  // Render
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
   encodeRenderPassAndSubmit(commandEncoder, renderPassDescriptor, renderPipeline, bindGroup[simulationIteration % 2]);
   
   device.queue.submit([commandEncoder.finish()]);
 
   requestAnimationFrame(render);
-}
-
-function update()
-{
-  if(activeScene + 1 < SCENES.length) {
-    if(timeInBeats >= SCENES[activeScene + 1].t) {
-      let s = SCENES[++activeScene];
-      if(s.r !== undefined)
-        device.queue.writeBuffer(rulesBuffer, 0, RULES, s.r * 55, 55);
-      if(s.d !== undefined)
-        updateDelay += s.d;
-    }
-
-    let curr = SCENES[activeScene];
-    let next = SCENES[activeScene + 1];
-    let t = (timeInBeats - curr.t) / (next.t - curr.t);
-    view[0] = curr.p + (next.p - curr.p) * t;
-    view[1] = ((activeScene % 2) ? 1 : -1) * t * 2 * Math.PI;
-    view[2] = (0.9 + 0.3 * Math.sin(timeInBeats * 0.2)) * Math.sin(timeInBeats * 0.05);
-  }
 }
 
 function setGrid(area)
@@ -342,7 +339,6 @@ async function main()
   await createAudioResources();
   await createRenderResources();
   setGrid(24);
-  update();
 
   document.body.innerHTML = "<button>CLICK<canvas style='width:0;cursor:none'>";
   canvas = document.querySelector("canvas");
