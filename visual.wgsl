@@ -219,5 +219,5 @@ fn fM(@builtin(position) pos: vec4f) -> @location(0) vec4f
     }
   }
 
-  return vec4f(pow(filmicToneACES(mix(col, vec3f(0), 1 - smoothstep(0, 30, uniforms[3]) + smoothstep(300 - 30, 300, uniforms[3]))), vec3f(0.5) /* gamma */), 1);
+  return vec4f(pow(filmicToneACES(mix(col, vec3f(0), 1 - smoothstep(0, 30, uniforms[3]) + smoothstep(270, 300, uniforms[3]))), vec3f(0.5) /* gamma */), 1);
 }
