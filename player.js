@@ -34,16 +34,16 @@ const RULES = new Uint32Array([
 
 // Rule set indices are -1 in player compared to main!!
 const SCENES = [
-  { t: 0, r: 2, d: 0.2, p: 40 }, // amoeba
+  { t: 0, r: 2, d: 0.2, p: 30 }, // amoeba
   { t: 40, r: 3, d: 0.5, p: 320 }, // pyro
   { t: 60, r: 2, d: 0.6, p: 220 }, // amoeba
   { t: 80, r: 0, d: 1.0, p: 180  }, // clouds
   { t: 110, r: 6, d: 0.75, p: 160 }, // ripple
-  { t: 150, r: 3, d: 0.875, p: 180 }, // pyro (trim down)
-  { t: 155, r: 4, d: 0.25, p: 170 }, // framework
-  { t: 190, r: 5, d: 0.25, p: 160 }, // spiky
-  { t: 220, r: 1, d: 0.375, p: 140 }, // 445
-  { t: 300, r: 1, d: 0.375, p: 180 }
+  { t: 150, r: 3, d: 0.875, p: 190 }, // pyro (trim down)
+  { t: 155, r: 4, d: 0.2, p: 180 }, // framework
+  { t: 190, r: 5, d: 0.3, p: 160 }, // spiky
+  { t: 220, r: 1, d: 0.4, p: 150 }, // 445
+  { t: 300, r: 1, d: 0.4, p: 190 }
 ];
 
 const AUDIO_SHADER = `
