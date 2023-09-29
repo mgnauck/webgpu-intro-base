@@ -6,18 +6,6 @@ struct Uniforms
   time: f32,
 }
 
-struct Grid
-{
-  mul: vec3i,
-  arr: array<u32>
-}
-
-struct RuleSet
-{
-  states: u32,
-  arr: array<u32>
-}
-
 struct Hit
 {
   index: i32,
@@ -32,21 +20,23 @@ struct Hit
 const WIDTH = 1024;
 const HEIGHT = WIDTH / 1.77;
 const EPSILON = 0.001;
+const gridMul = vec3i(1, 256, 256 * 256);
+const gridMulF = vec3f(gridMul);
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
-@group(0) @binding(1) var<storage> grid: Grid;
-@group(0) @binding(2) var<storage, read_write> outputGrid: Grid;
-@group(0) @binding(3) var<storage> rules: RuleSet;
+@group(0) @binding(1) var<storage> grid: array<u32>;
+@group(0) @binding(2) var<storage, read_write> outputGrid: array<u32>;
+@group(0) @binding(3) var<storage> rules: array<u32>;
 
 fn getCell(x: i32, y: i32, z: i32) -> u32
 {
   // Consider only states 0 and 1. Cells in refactory period do NOT count as active neighbours, i.e. are counted as 0.
-  return u32(1 - min(abs(1 - i32(grid.arr[grid.mul.z * z + grid.mul.y * y + x])), 1));
+  return u32(1 - min(abs(1 - i32(grid[gridMul.z * z + gridMul.y * y + x])), 1));
 }
 
 fn getMooreNeighbourCountWrap(pos: vec3i) -> u32
 {
-  let res = grid.mul.y;
+  let res = gridMul.y;
   let dec = vec3i((pos.x - 1) % res, (pos.y - 1) % res, (pos.z - 1) % res);
   let inc = vec3i((pos.x + 1) % res, (pos.y + 1) % res, (pos.z + 1) % res);
 
@@ -78,30 +68,26 @@ fn getMooreNeighbourCountWrap(pos: vec3i) -> u32
           getCell(dec.x, dec.y, dec.z);
 }
 
-fn evalState(pos: vec3i, states: u32)
-{
-  let index = dot(pos, grid.mul);
-  let value = grid.arr[index];
-
-  switch(value) {
-    case 0: {
-      outputGrid.arr[index] = rules.arr[27 + getMooreNeighbourCountWrap(pos)];
-    }
-    case 1: {
-      // Dying state 1 goes to 2 (or dies directly by being moduloed to 0, in case there are only 2 states)
-      outputGrid.arr[index] = (1 + 1 - rules.arr[getMooreNeighbourCountWrap(pos)]) % rules.states;
-    }
-    default {
-      // Refactory period
-      outputGrid.arr[index] = min(value + 1, rules.states) % rules.states; 
-    }
-  }
-}
-
 @compute @workgroup_size(4,4,4)
 fn computeMain(@builtin(global_invocation_id) globalId: vec3u)
 {
-  evalState(vec3i(globalId), rules.states);
+  let pos = vec3i(globalId);
+  let index = dot(pos, gridMul);
+  let value = grid[index];
+
+  switch(value) {
+    case 0: {
+      outputGrid[index] = rules[1 + 27 + getMooreNeighbourCountWrap(pos)];
+    }
+    case 1: {
+      // Dying state 1 goes to 2 (or dies directly by being moduloed to 0, in case there are only 2 states)
+      outputGrid[index] = (1 + 1 - rules[1 + getMooreNeighbourCountWrap(pos)]) % rules[0];
+    }
+    default {
+      // Refactory period
+      outputGrid[index] = min(value + 1, rules[0]) % rules[0]; 
+    }
+  }
 }
 
 fn minComp(v: vec3f) -> f32
@@ -127,16 +113,15 @@ fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, invDir: vec3f, tmin: 
 
 fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, hit: ptr<function, Hit>) -> bool
 {
-  let mulf = vec3f(grid.mul);
   var stepDir = sign(invDir);
   var t = (vec3f(0.5) + 0.5 * stepDir - fract(ori)) * invDir;
   var mask = vec3f(0);
 
   (*hit).dist = 0.0;
-  (*hit).index = i32(dot(mulf, floor(vec3f(mulf.y * 0.5) + ori)));
+  (*hit).index = i32(dot(gridMulF, floor(vec3f(gridMulF.y * 0.5) + ori)));
   
   loop {
-    (*hit).state = grid.arr[(*hit).index];
+    (*hit).state = grid[(*hit).index];
     if((*hit).state > 0) {
       (*hit).norm = mask * -stepDir;
       return true;
@@ -152,28 +137,28 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, hit: ptr<function, Hit>) -
     mask.z = f32(t.z <= t.x && t.z <= t.y);
 
     t += mask * stepDir * invDir;
-    (*hit).index += i32(dot(mulf, mask * stepDir));
+    (*hit).index += i32(dot(gridMulF, mask * stepDir));
   }
 }
 
 fn calcOcclusion(pos: vec3f, index: i32, norm: vec3i) -> f32
 {
-  let above = index + dot(grid.mul, norm);
+  let above = index + dot(gridMul, norm);
   let dir = abs(norm);
-  let hori = dot(grid.mul, dir.yzx);
-  let vert = dot(grid.mul, dir.zxy);
+  let hori = dot(gridMul, dir.yzx);
+  let vert = dot(gridMul, dir.zxy);
 
   let edgeCellStates = vec4f(
-    f32(min(1, grid.arr[above + hori])),
-    f32(min(1, grid.arr[above - hori])),
-    f32(min(1, grid.arr[above + vert])),
-    f32(min(1, grid.arr[above - vert])));
+    f32(min(1, grid[above + hori])),
+    f32(min(1, grid[above - hori])),
+    f32(min(1, grid[above + vert])),
+    f32(min(1, grid[above - vert])));
 
   let cornerCellStates = vec4f(
-    f32(min(1, grid.arr[above + hori + vert])),
-    f32(min(1, grid.arr[above - hori + vert])),
-    f32(min(1, grid.arr[above + hori - vert])),
-    f32(min(1, grid.arr[above - hori - vert])));
+    f32(min(1, grid[above + hori + vert])),
+    f32(min(1, grid[above - hori + vert])),
+    f32(min(1, grid[above + hori - vert])),
+    f32(min(1, grid[above - hori - vert])));
 
   let uvLocal = fract(pos);
   let uv = vec2f(dot(uvLocal, vec3f(dir.yzx)), dot(uvLocal, vec3f(dir.zxy)));
@@ -195,10 +180,10 @@ fn shade(pos: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> vec3f
     return vec3f(0);
   }*/
 
-  let cnt = f32(rules.states);
+  let cnt = f32(rules[0]);
   let val = cnt / min(f32((*hit).state), cnt);
   let sky = 0.4 + (*hit).norm.y * 0.6;
-  let col = vec3f(0.005) + (1.0 - 0.15 * (cnt - 5.0)) * (vec3f(0.5) + pos / f32(grid.mul.y)) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
+  let col = vec3f(0.005) + (1.0 - 0.15 * (cnt - 5.0)) * (vec3f(0.5) + pos / gridMulF.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
   let occ = calcOcclusion(pos, (*hit).index, vec3i((*hit).norm));
 
   return col * occ * occ * occ;
@@ -209,7 +194,7 @@ fn trace(ori: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> bool
   let invDir = 1.0 / dir;
   var tmin: f32;
   var tmax: f32;
-  let halfGrid = vec3f(f32(grid.mul.y / 2));
+  let halfGrid = vec3f(gridMulF.y / 2);
 
   if(intersectAabb(-halfGrid, halfGrid, ori, invDir, &tmin, &tmax)) {
     tmin = max(tmin + EPSILON, 0.0);

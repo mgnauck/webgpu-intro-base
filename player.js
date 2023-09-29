@@ -127,8 +127,9 @@ async function createAudioResources()
     size: (BUFFER_DIM ** 3) * 2 * 4,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC});
 
-  let audioUniformBuffer = device.createBuffer({
-    size: 2 * 4,
+  // Will be reused by visual shader
+  uniformBuffer = device.createBuffer({
+    size: 4 * 4, // We actually only need two floats for audio uniforms
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
 
   let audioBindGroupLayout = device.createBindGroupLayout({
@@ -140,7 +141,7 @@ async function createAudioResources()
   let audioBindGroup = device.createBindGroup({
     layout: audioBindGroupLayout,
     entries: [
-      {binding: 0, resource: {buffer: audioUniformBuffer}},
+      {binding: 0, resource: {buffer: uniformBuffer}},
       {binding: 1, resource: {buffer: audioBuffer}}
     ]});
 
@@ -150,7 +151,7 @@ async function createAudioResources()
 
   let audioPipelineLayout = device.createPipelineLayout({bindGroupLayouts: [audioBindGroupLayout]});
 
-  device.queue.writeBuffer(audioUniformBuffer, 0, new Uint32Array([BUFFER_DIM, audioContext.sampleRate]));
+  device.queue.writeBuffer(uniformBuffer, 0, new Uint32Array([BUFFER_DIM, audioContext.sampleRate]));
 
   let pipeline = await createComputePipeline(device.createShaderModule({code: AUDIO_SHADER}), audioPipelineLayout, "audioMain");
 
@@ -191,13 +192,14 @@ async function createRenderResources()
     ]
   });
  
-  uniformBuffer = device.createBuffer({
+  // Reusing uniform buffer from audio shader
+  /*uniformBuffer = device.createBuffer({
     size: 4 * 4, // radius, phi, theta, time
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});*/
 
   for(let i=0; i<2; i++)
     gridBuffer[i] = device.createBuffer({
-      size: (3 + (BUFFER_DIM ** 3)) * 4,
+      size: (BUFFER_DIM ** 3) * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   rulesBuffer = device.createBuffer({
@@ -290,14 +292,10 @@ function render(time)
 function setGrid(area)
 {
   let rand = xorshift32(4079287172);
-  let grid = new Uint32Array(3 + (BUFFER_DIM ** 3));
+  let grid = new Uint32Array(BUFFER_DIM ** 3);
 
   for(let i=0; i<grid.length; i++)
     grid[i] = 0;
-
-  grid[0] = 1;
-  grid[1] = BUFFER_DIM;
-  grid[2] = BUFFER_DIM ** 2;
 
   const center = BUFFER_DIM * 0.5;
   const d = area * 0.5;
@@ -305,7 +303,7 @@ function setGrid(area)
   for(let k=center - d; k<center + d; k++)
     for(let j=center - d; j<center + d; j++)
       for(let i=center - d; i<center + d; i++)
-        grid[3 + (BUFFER_DIM ** 2) * k + BUFFER_DIM * j + i] = rand() > 0.6 ? 1 : 0;
+        grid[(BUFFER_DIM ** 2) * k + BUFFER_DIM * j + i] = rand() > 0.6 ? 1 : 0;
 
   device.queue.writeBuffer(gridBuffer[0], 0, grid);
   device.queue.writeBuffer(gridBuffer[1], 0, grid);

@@ -436,20 +436,15 @@ function setGrid(area, prob, seed)
 
   gridRes = MAX_GRID_RES;
 
-  grid[0] = 1;
-  grid[1] = gridRes;
-  grid[2] = gridRes ** 2;
-
   const center = gridRes * 0.5;
   const d = Math.ceil(area / 2);
 
   rand = xorshift32(seed);
 
-  // TODO Make initial grid somewhat more interesting
   for(let k=center - d; k<center + d; k++)
     for(let j=center - d; j<center + d; j++)
       for(let i=center - d; i<center + d; i++)
-        grid[3 + (gridRes ** 2) * k + gridRes * j + i] =  rand() > prob ? 1 : 0;
+        grid[(gridRes ** 2) * k + gridRes * j + i] =  rand() > prob ? 1 : 0;
 
   device.queue.writeBuffer(gridBuffer[0], 0, grid);
   device.queue.writeBuffer(gridBuffer[1], 0, grid);
@@ -655,7 +650,7 @@ async function main()
   }
 
   // Grid mul + grid
-  grid = new Uint32Array(3 + MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
+  grid = new Uint32Array(MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
   
   await createRenderResources();
   await createPipelines();
