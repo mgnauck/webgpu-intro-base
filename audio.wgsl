@@ -1,9 +1,3 @@
-struct AudioParameters
-{
-  bufferDim: u32, // Cubic root of audio buffer size to match grid dimension of compute shader invocations
-  sampleRate: u32 // Sample rate as per WebAudio context
-}
-
 const BPM = 120.0;
 const PI = 3.141592654;
 const TAU = 6.283185307;
@@ -108,7 +102,7 @@ fn simple2(time: f32, freq: f32) -> f32
   const cnt = 12;
   for(var i=0;i<cnt;i++)
   {
-    let last = f32(cnt-i)*(1.0/f32(params.sampleRate));
+    let last = f32(cnt-i)*(1.0/f32(params[0]));
     let t = time - last;
     let inp = simple(t, freq);
     v0 = (1.0-r*c)*v0  -  (c)*v1  + (c)*inp;
@@ -197,20 +191,15 @@ fn isPattern(time: f32, start: u32, end: u32) -> bool
   return patternIndex >= start && patternIndex < end;
 }
 
-@group(0) @binding(0) var<uniform> params: AudioParameters;
+@group(0) @binding(0) var<storage> params: array<u32>;
 @group(0) @binding(1) var<storage, read_write> buffer: array<vec2f>;
 
 @compute @workgroup_size(4, 4, 4)
 fn audioMain(@builtin(global_invocation_id) globalId: vec3u)
 {
-  // Make sure workgroups align properly with buffer size, i.e. do not run beyond buffer dimension
-  if(globalId.x >= params.bufferDim || globalId.y >= params.bufferDim || globalId.z >= params.bufferDim) {
-    return;
-  }
-
   // Calculate current sample from given buffer id
-  let sample = dot(globalId, vec3u(1, params.bufferDim, params.bufferDim * params.bufferDim));
-  let time = f32(sample) / f32(params.sampleRate);
+  let sample = dot(globalId, vec3u(1, 256, 256 * 256));
+  let time = f32(sample) / f32(params[0]);
   let patternTime = time % TIME_PER_PATTERN;
 
   // Samples are calculated in mono and then written to left/right

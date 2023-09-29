@@ -1,11 +1,3 @@
-struct Uniforms
-{
-  radius: f32,
-  phi: f32,
-  theta: f32,
-  time: f32,
-}
-
 struct Hit
 {
   index: i32,
@@ -23,7 +15,7 @@ const EPSILON = 0.001;
 const gridMul = vec3i(1, 256, 256 * 256);
 const gridMulF = vec3f(gridMul);
 
-@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(0) @binding(0) var<storage> uniforms: array<f32>;
 @group(0) @binding(1) var<storage> grid: array<u32>;
 @group(0) @binding(2) var<storage, read_write> outputGrid: array<u32>;
 @group(0) @binding(3) var<storage> rules: array<u32>;
@@ -69,7 +61,7 @@ fn getMooreNeighbourCountWrap(pos: vec3i) -> u32
 }
 
 @compute @workgroup_size(4,4,4)
-fn computeMain(@builtin(global_invocation_id) globalId: vec3u)
+fn cM(@builtin(global_invocation_id) globalId: vec3u)
 {
   let pos = vec3i(globalId);
   let index = dot(pos, gridMul);
@@ -223,18 +215,18 @@ fn filmicToneACES(x: vec3f) -> vec3f
 }
 
 @vertex
-fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f
+fn vM(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f
 {
   let pos = array<vec2f, 4>(vec2f(-1, 1), vec2f(-1, -1), vec2f(1), vec2f(1, -1));
   return vec4f(pos[vertexIndex], 0, 1);
 }
 
 @fragment
-fn fragmentMain(@builtin(position) position: vec4f) -> @location(0) vec4f
+fn fM(@builtin(position) position: vec4f) -> @location(0) vec4f
 {
   let dirEyeSpace = normalize(vec3f((position.xy - vec2f(WIDTH, HEIGHT) * 0.5) / f32(HEIGHT), 1 /* FOV */));
 
-  let ori = vec3f(uniforms.radius * cos(uniforms.theta) * cos(uniforms.phi), uniforms.radius * sin(uniforms.theta), uniforms.radius * cos(uniforms.theta) * sin(uniforms.phi));
+  let ori = vec3f(uniforms[0] * cos(uniforms[2]) * cos(uniforms[1]), uniforms[0] * sin(uniforms[2]), uniforms[0] * cos(uniforms[2]) * sin(uniforms[1]));
 
   let fwd = normalize(-ori);
   let ri = normalize(cross(fwd, vec3f(0, 1, 0)));
@@ -245,7 +237,7 @@ fn fragmentMain(@builtin(position) position: vec4f) -> @location(0) vec4f
   var hit: Hit;
   trace(ori, dir, &hit);
 
-  let fadeIn = 1.0 - smoothstep(0.0, 25.0, uniforms.time);
-  let fadeOut = smoothstep(300.0 - 25.0, 300.0, uniforms.time);
+  let fadeIn = 1.0 - smoothstep(0.0, 25.0, uniforms[3]);
+  let fadeOut = smoothstep(300.0 - 25.0, 300.0, uniforms[3]);
   return vec4f(pow(filmicToneACES(mix(hit.col, vec3f(0.0), fadeIn + fadeOut)), vec3f(0.4545)), 1.0);
 }

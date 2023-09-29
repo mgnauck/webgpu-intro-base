@@ -183,11 +183,11 @@ async function createAudioResources()
   let audioUniformBuffer = device.createBuffer({
     // (buffer dimension + sample rate) * 4 bytes (uint32)
     size: 2 * 4,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   let audioBindGroupLayout = device.createBindGroupLayout({
     entries: [
-      {binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: {type: "uniform"}},
+      {binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: {type: "read-only-storage"}},
       {binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: {type: "storage"}}
     ]});
 
@@ -204,7 +204,7 @@ async function createAudioResources()
 
   audioPipelineLayout = device.createPipelineLayout({bindGroupLayouts: [audioBindGroupLayout]});
 
-  device.queue.writeBuffer(audioUniformBuffer, 0, new Uint32Array([Math.ceil(Math.cbrt(AUDIO_BUFFER_SIZE)), audioContext.sampleRate]));
+  device.queue.writeBuffer(audioUniformBuffer, 0, new Uint32Array([audioContext.sampleRate]));
 }
 
 async function renderAudio()
@@ -281,7 +281,7 @@ async function createRenderResources()
 {
   let bindGroupLayout = device.createBindGroupLayout({
     entries: [ 
-      {binding: 0, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: {type: "uniform"}},
+      {binding: 0, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: {type: "read-only-storage"}},
       {binding: 1, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: {type: "read-only-storage"}},
       {binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: {type: "storage"}},
       {binding: 3, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: {type: "read-only-storage"}},
@@ -290,7 +290,7 @@ async function createRenderResources()
  
   uniformBuffer = device.createBuffer({
     size: 4 * 4, // radius, phi, theta, time 
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   for(let i=0; i<2; i++)
     gridBuffer[i] = device.createBuffer({
@@ -330,8 +330,8 @@ async function createPipelines()
   let shaderCode = await loadTextFile("visual.wgsl");
   let shaderModule = device.createShaderModule({code: shaderCode});
 
-  computePipeline = await createComputePipeline(shaderModule, pipelineLayout, "computeMain");
-  renderPipeline = await createRenderPipeline(shaderModule, pipelineLayout, "vertexMain", "fragmentMain");
+  computePipeline = await createComputePipeline(shaderModule, pipelineLayout, "cM");
+  renderPipeline = await createRenderPipeline(shaderModule, pipelineLayout, "vM", "fM");
 }
 
 let last;

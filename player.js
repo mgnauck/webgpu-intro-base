@@ -78,34 +78,34 @@ async function createComputePipeline(shaderModule, pipelineLayout, entryPoint)
     layout: pipelineLayout,
     compute: {
       module: shaderModule,
-      entryPoint: entryPoint
+      entryPoint: entryPoint // TODO Hardcode
     }
   });
 }
 
-async function createRenderPipeline(shaderModule, pipelineLayout, vertexEntryPoint, fragmentEntryPoint)
+async function createRenderPipeline(shaderModule, pipelineLayout)
 {
   return device.createRenderPipelineAsync({
     layout: pipelineLayout,
     vertex: {
       module: shaderModule,
-      entryPoint: vertexEntryPoint
+      entryPoint: "vM"
     },
     fragment: {
       module: shaderModule,
-      entryPoint: fragmentEntryPoint,
+      entryPoint: "fM",
       targets: [{format: "bgra8unorm"}]
     },
     primitive: {topology: "triangle-strip"}
   });
 }
 
-function encodeComputePassAndSubmit(commandEncoder, pipeline, bindGroup, count)
+function encodeComputePassAndSubmit(commandEncoder, pipeline, bindGroup)
 {
   const passEncoder = commandEncoder.beginComputePass();
   passEncoder.setPipeline(pipeline);
   passEncoder.setBindGroup(0, bindGroup);
-  passEncoder.dispatchWorkgroups(count, count, count);
+  passEncoder.dispatchWorkgroups(64, 64, 64);
   passEncoder.end();
 }
 
@@ -130,11 +130,11 @@ async function createAudioResources()
   // Will be reused by visual shader
   uniformBuffer = device.createBuffer({
     size: 4 * 4, // We actually only need two floats for audio uniforms
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   let audioBindGroupLayout = device.createBindGroupLayout({
     entries: [
-      {binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: {type: "uniform"}},
+      {binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: {type: "read-only-storage"}},
       {binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: {type: "storage"}}
     ]});
 
@@ -151,13 +151,13 @@ async function createAudioResources()
 
   let audioPipelineLayout = device.createPipelineLayout({bindGroupLayouts: [audioBindGroupLayout]});
 
-  device.queue.writeBuffer(uniformBuffer, 0, new Uint32Array([BUFFER_DIM, audioContext.sampleRate]));
+  device.queue.writeBuffer(uniformBuffer, 0, new Uint32Array([audioContext.sampleRate]));
 
   let pipeline = await createComputePipeline(device.createShaderModule({code: AUDIO_SHADER}), audioPipelineLayout, "audioMain");
 
   let commandEncoder = device.createCommandEncoder();
 
-  encodeComputePassAndSubmit(commandEncoder, pipeline, audioBindGroup, BUFFER_DIM / 4);
+  encodeComputePassAndSubmit(commandEncoder, pipeline, audioBindGroup);
 
   commandEncoder.copyBufferToBuffer(audioBuffer, 0, audioReadBuffer, 0, (BUFFER_DIM ** 3) * 2 * 4);
 
@@ -185,18 +185,13 @@ async function createRenderResources()
 {
   let bindGroupLayout = device.createBindGroupLayout({
     entries: [ 
-      {binding: 0, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: {type: "uniform"}},
+      {binding: 0, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: {type: "read-only-storage"}},
       {binding: 1, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: {type: "read-only-storage"}},
       {binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: {type: "storage"}},
       {binding: 3, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: {type: "read-only-storage"}},
     ]
   });
  
-  // Reusing uniform buffer from audio shader
-  /*uniformBuffer = device.createBuffer({
-    size: 4 * 4, // radius, phi, theta, time
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST});*/
-
   for(let i=0; i<2; i++)
     gridBuffer[i] = device.createBuffer({
       size: (BUFFER_DIM ** 3) * 4,
@@ -230,8 +225,8 @@ async function createRenderResources()
   };
 
   let shaderModule = device.createShaderModule({code: VISUAL_SHADER});
-  computePipeline = await createComputePipeline(shaderModule, pipelineLayout, "computeMain");
-  renderPipeline = await createRenderPipeline(shaderModule, pipelineLayout, "vertexMain", "fragmentMain");
+  computePipeline = await createComputePipeline(shaderModule, pipelineLayout, "cM");
+  renderPipeline = await createRenderPipeline(shaderModule, pipelineLayout);
 }
 
 let last;
@@ -268,7 +263,7 @@ function render(time)
   
   // Simulation
   if(timeInBeats - lastSimulationUpdateTime > SCENES[activeScene].d) {
-    encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2], BUFFER_DIM / 4); 
+    encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2]); 
     simulationIteration++;
     lastSimulationUpdateTime = (audioContext.currentTime - startTime) * BPM / 60;
   }
@@ -292,36 +287,18 @@ function render(time)
 function setGrid(area)
 {
   let rand = xorshift32(4079287172);
-  let grid = new Uint32Array(BUFFER_DIM ** 3);
-
-  for(let i=0; i<grid.length; i++)
-    grid[i] = 0;
-
-  const center = BUFFER_DIM * 0.5;
-  const d = area * 0.5;
-
-  for(let k=center - d; k<center + d; k++)
-    for(let j=center - d; j<center + d; j++)
-      for(let i=center - d; i<center + d; i++)
-        grid[(BUFFER_DIM ** 2) * k + BUFFER_DIM * j + i] = rand() > 0.6 ? 1 : 0;
-
-  device.queue.writeBuffer(gridBuffer[0], 0, grid);
-  device.queue.writeBuffer(gridBuffer[1], 0, grid);
-
-  /*// TODO Try this for size, once grid mul is completely moved out of javascript and hardocded in shader
   const pos = BUFFER_DIM / 2 - area / 2;
+  let grid = new Uint32Array(area);
   for(let k=0; k<area; k++) {
     for(let j=0; j<area; j++) { 
-      let grid = new Uint32Array(area);
       for(let i=0; i<area; i++)
         grid[i] = rand() > 0.6 ? 1 : 0;
       let ofs = (BUFFER_DIM ** 2) * (pos + k) + BUFFER_DIM * (pos + j) + pos;
-      device.queue.writeBuffer(gridBuffer[0], ofs, grid);
-      device.queue.writeBuffer(gridBuffer[1], ofs, grid);
+      device.queue.writeBuffer(gridBuffer[0], ofs * 4, grid);
+      device.queue.writeBuffer(gridBuffer[1], ofs * 4, grid);
     }
-  }*/
-}
- 
+  }
+} 
 
 function startRender()
 {

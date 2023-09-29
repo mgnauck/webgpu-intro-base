@@ -26,4 +26,4 @@ terser ${infile_name}_with_shaders.${infile_ext} -m -c toplevel,passes=5,drop_co
 ../js-payload-compress ${infile_name}_minified.${infile_ext} ${infile_name}_compressed.html
 
 # Example:
-# ./compress.sh player.js audioMain,computeMain,vertexMain,fragmentMain
+# ./compress.sh player.js audioMain,cM,vM,fM
