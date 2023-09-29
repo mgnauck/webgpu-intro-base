@@ -63,18 +63,14 @@ fn cM(@builtin(global_invocation_id) globalId: vec3u)
   let index = dot(pos, gridMul);
   let value = grid[index];
 
-  switch(value) {
-    case 0: {
-      outputGrid[index] = rules[1 + 27 + getMooreNeighbourCountWrap(pos)];
-    }
-    case 1: {
-      // Dying state 1 goes to 2 (or dies directly by being moduloed to 0, in case there are only 2 states)
-      outputGrid[index] = (1 + 1 - rules[1 + getMooreNeighbourCountWrap(pos)]) % rules[0];
-    }
-    default {
-      // Refactory period
-      outputGrid[index] = min(value + 1, rules[0]) % rules[0]; 
-    }
+  if value == 0 {
+    outputGrid[index] = rules[28 + getMooreNeighbourCountWrap(pos)];
+  } else if value == 1 {
+    // Dying state 1 goes to 2 (or dies directly by being moduloed to 0, in case there are only 2 states)
+    outputGrid[index] = (2 - rules[1 + getMooreNeighbourCountWrap(pos)]) % rules[0];
+  } else {
+    // Refactory period
+    outputGrid[index] = min(value + 1, rules[0]) % rules[0]; 
   }
 }
 
@@ -158,7 +154,7 @@ fn calcOcclusion(pos: vec3f, index: i32, norm: vec3i) -> f32
   return 1 - (edgeOcc.x + edgeOcc.y + edgeOcc.z + edgeOcc.w + cornerOcc.x + cornerOcc.y + cornerOcc.z + cornerOcc.w) * 0.5;
 }
 
-fn shade(pos: vec3f, dir: vec3f, tmax: f32, hit: ptr<function, Hit>) -> vec3f
+fn shade(pos: vec3f, tmax: f32, hit: ptr<function, Hit>) -> vec3f
 {
   // Wireframe, better add AA
   /*let border = vec3f(0.5 - 0.05);
@@ -171,7 +167,7 @@ fn shade(pos: vec3f, dir: vec3f, tmax: f32, hit: ptr<function, Hit>) -> vec3f
   let cnt = f32(rules[0]);
   let val = cnt / min(f32((*hit).state), cnt);
   let sky = 0.4 + (*hit).norm.y * 0.6;
-  let col = vec3f(0.005) + (1 - 0.15 * (cnt - 5.0)) * (vec3f(0.5) + pos / gridMulF.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / tmax);
+  let col = vec3f(0.005) + (1 - 0.15 * (cnt - 5)) * (vec3f(0.5) + pos / gridMulF.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / tmax);
   let occ = calcOcclusion(pos, (*hit).index, vec3i((*hit).norm));
 
   return col * occ * occ * occ;
@@ -191,40 +187,37 @@ fn filmicToneACES(x: vec3f) -> vec3f
 @vertex
 fn vM(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f
 {
-  let pos = array<vec2f, 4>(vec2f(-1, 1), vec2f(-1, -1), vec2f(1), vec2f(1, -1));
+  let pos = array<vec2f, 4>(vec2f(-1, 1), vec2f(-1), vec2f(1), vec2f(1, -1));
   return vec4f(pos[vertexIndex], 0, 1);
 }
 
 @fragment
-fn fM(@builtin(position) position: vec4f) -> @location(0) vec4f
+fn fM(@builtin(position) pos: vec4f) -> @location(0) vec4f
 {
-  let dirEyeSpace = normalize(vec3f((position.xy - vec2f(WIDTH, HEIGHT) * 0.5) / f32(HEIGHT), 1 /* FOV */));
+  let dirEyeSpace = normalize(vec3f((pos.xy - vec2f(WIDTH, HEIGHT) * 0.5) / HEIGHT, 1 /* FOV */));
 
   let ori = vec3f(uniforms[0] * cos(uniforms[2]) * cos(uniforms[1]), uniforms[0] * sin(uniforms[2]), uniforms[0] * cos(uniforms[2]) * sin(uniforms[1]));
 
   let fwd = normalize(-ori);
   let ri = normalize(cross(fwd, vec3f(0, 1, 0)));
-  let up = cross(ri, fwd);
 
-  var dir = ri * dirEyeSpace.x - up * dirEyeSpace.y + fwd * dirEyeSpace.z;
+  var dir = ri * dirEyeSpace.x - cross(ri, fwd) * dirEyeSpace.y + fwd * dirEyeSpace.z;
 
   let halfGrid = vec3f(gridMulF.y * 0.5);
   let invDir = 1 / dir;
 
   var tmin: f32;
   var tmax: f32;
-  var col = vec3f(0);
   var hit: Hit;
+  var col = vec3f(0);
 
   if intersectAabb(-halfGrid, halfGrid, ori, invDir, &tmin, &tmax) {
-    tmin = max(tmin + 0.001, 0); // EPSILON 0.001
+    tmin = max(tmin + 0.001, 0); // epsilon
     tmax = tmax - 0.001 - tmin;
     if traverseGrid(ori + tmin * dir, invDir, tmax, &hit) {
-      col = shade(ori + (tmin + hit.dist) * dir, dir, tmax, &hit);
+      col = shade(ori + (tmin + hit.dist) * dir, tmax, &hit);
     }
   }
 
-  let fadeIn = 1 - smoothstep(0, 30, uniforms[3]);
-  let fadeOut = smoothstep(300 - 30, 300, uniforms[3]);
-  return vec4f(pow(filmicToneACES(mix(col, vec3f(0), fadeIn + fadeOut)), vec3f(0.5)), 1);
+  return vec4f(pow(filmicToneACES(mix(col, vec3f(0), 1 - smoothstep(0, 30, uniforms[3]) + smoothstep(300 - 30, 300, uniforms[3]))), vec3f(0.5) /* gamma */), 1);
 }
