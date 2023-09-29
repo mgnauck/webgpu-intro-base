@@ -259,5 +259,8 @@ fn fragmentMain(@builtin(position) position: vec4f) -> @location(0) vec4f
 
   var hit: Hit;
   trace(ori, dir, &hit);
-  return vec4f(pow(filmicToneACES(hit.col), vec3f(0.4545)), 1.0);
+
+  let fadeIn = 1.0 - smoothstep(0.0, 25.0, uniforms.time);
+  let fadeOut = smoothstep(300.0 - 25.0, 300.0, uniforms.time);
+  return vec4f(pow(filmicToneACES(mix(hit.col, vec3f(0.0), fadeIn + fadeOut)), vec3f(0.4545)), 1.0);
 }
