@@ -214,7 +214,7 @@ async function renderAudio()
   let shaderCode = await loadTextFile(AUDIO_SHADER_FILE);
   let shaderModule = device.createShaderModule({code: shaderCode});
 
-  let pipeline = await createComputePipeline(shaderModule, audioPipelineLayout, "audioMain");
+  let pipeline = await createComputePipeline(shaderModule, audioPipelineLayout, "cM");
 
   let commandEncoder = device.createCommandEncoder();
 

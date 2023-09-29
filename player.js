@@ -72,13 +72,13 @@ function xorshift32(a)
   }
 }
 
-async function createComputePipeline(shaderModule, pipelineLayout, entryPoint)
+async function createComputePipeline(shaderModule, pipelineLayout)
 {
   return device.createComputePipelineAsync({
     layout: pipelineLayout,
     compute: {
       module: shaderModule,
-      entryPoint: entryPoint // TODO Hardcode
+      entryPoint: "cM"
     }
   });
 }
@@ -153,7 +153,7 @@ async function createAudioResources()
 
   device.queue.writeBuffer(uniformBuffer, 0, new Uint32Array([audioContext.sampleRate]));
 
-  let pipeline = await createComputePipeline(device.createShaderModule({code: AUDIO_SHADER}), audioPipelineLayout, "audioMain");
+  let pipeline = await createComputePipeline(device.createShaderModule({code: AUDIO_SHADER}), audioPipelineLayout);
 
   let commandEncoder = device.createCommandEncoder();
 
@@ -225,7 +225,7 @@ async function createRenderResources()
   };
 
   let shaderModule = device.createShaderModule({code: VISUAL_SHADER});
-  computePipeline = await createComputePipeline(shaderModule, pipelineLayout, "cM");
+  computePipeline = await createComputePipeline(shaderModule, pipelineLayout);
   renderPipeline = await createRenderPipeline(shaderModule, pipelineLayout);
 }
 

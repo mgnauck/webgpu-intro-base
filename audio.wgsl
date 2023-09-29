@@ -195,7 +195,7 @@ fn isPattern(time: f32, start: u32, end: u32) -> bool
 @group(0) @binding(1) var<storage, read_write> buffer: array<vec2f>;
 
 @compute @workgroup_size(4, 4, 4)
-fn audioMain(@builtin(global_invocation_id) globalId: vec3u)
+fn cM(@builtin(global_invocation_id) globalId: vec3u)
 {
   // Calculate current sample from given buffer id
   let sample = dot(globalId, vec3u(1, 256, 256 * 256));
