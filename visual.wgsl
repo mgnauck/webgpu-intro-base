@@ -5,13 +5,11 @@ struct Hit
   norm: vec3f,
   state: u32,
   dist: f32,
-  maxDist: f32,
-  col: vec3f
 }
 
 const WIDTH = 1024;
 const HEIGHT = WIDTH / 1.77;
-const EPSILON = 0.001;
+
 const gridMul = vec3i(1, 256, 256 * 256);
 const gridMulF = vec3f(gridMul);
 
@@ -110,7 +108,7 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, hit: ptr<function, Hit>) -
   var mask = vec3f(0);
 
   (*hit).dist = 0.0;
-  (*hit).index = i32(dot(gridMulF, floor(vec3f(gridMulF.y * 0.5) + ori)));
+  (*hit).index = i32(dot(gridMulF, floor(vec3f(gridMulF.y / 2) + ori)));
   
   loop {
     (*hit).state = grid[(*hit).index];
@@ -162,7 +160,7 @@ fn calcOcclusion(pos: vec3f, index: i32, norm: vec3i) -> f32
   return 1.0 - (edgeOcc.x + edgeOcc.y + edgeOcc.z + edgeOcc.w + cornerOcc.x + cornerOcc.y + cornerOcc.z + cornerOcc.w) * 0.5;
 }
 
-fn shade(pos: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> vec3f
+fn shade(pos: vec3f, dir: vec3f, tmax: f32, hit: ptr<function, Hit>) -> vec3f
 {
   // Wireframe, better add AA
   /*let border = vec3f(0.5 - 0.05);
@@ -175,32 +173,10 @@ fn shade(pos: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> vec3f
   let cnt = f32(rules[0]);
   let val = cnt / min(f32((*hit).state), cnt);
   let sky = 0.4 + (*hit).norm.y * 0.6;
-  let col = vec3f(0.005) + (1.0 - 0.15 * (cnt - 5.0)) * (vec3f(0.5) + pos / gridMulF.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / (*hit).maxDist);
+  let col = vec3f(0.005) + (1.0 - 0.15 * (cnt - 5.0)) * (vec3f(0.5) + pos / gridMulF.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / tmax);
   let occ = calcOcclusion(pos, (*hit).index, vec3i((*hit).norm));
 
   return col * occ * occ * occ;
-}
-
-fn trace(ori: vec3f, dir: vec3f, hit: ptr<function, Hit>) -> bool
-{
-  let invDir = 1.0 / dir;
-  var tmin: f32;
-  var tmax: f32;
-  let halfGrid = vec3f(gridMulF.y / 2);
-
-  if(intersectAabb(-halfGrid, halfGrid, ori, invDir, &tmin, &tmax)) {
-    tmin = max(tmin + EPSILON, 0.0);
-    (*hit).maxDist = tmax - EPSILON - tmin;
-    if(traverseGrid(ori + tmin * dir, invDir, (*hit).maxDist, hit)) {
-      (*hit).pos = ori + (tmin + (*hit).dist) * dir;
-      (*hit).col = shade((*hit).pos, dir, hit);
-      return true;
-    }
-  }
-
-  (*hit).col = vec3f(0);
-
-  return false;
 }
 
 // https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
@@ -234,10 +210,23 @@ fn fM(@builtin(position) position: vec4f) -> @location(0) vec4f
 
   var dir = ri * dirEyeSpace.x - up * dirEyeSpace.y + fwd * dirEyeSpace.z;
 
+  let halfGrid = vec3f(gridMulF.y / 2);
+  let invDir = 1.0 / dir;
+
+  var tmin: f32;
+  var tmax: f32;
+  var col = vec3f(0);
   var hit: Hit;
-  trace(ori, dir, &hit);
+
+  if(intersectAabb(-halfGrid, halfGrid, ori, invDir, &tmin, &tmax)) {
+    tmin = max(tmin + 0.001, 0.0); // EPSILON 0.001
+    tmax = tmax - 0.001 - tmin;
+    if(traverseGrid(ori + tmin * dir, invDir, tmax, &hit)) {
+      col = shade(ori + (tmin + hit.dist) * dir, dir, tmax, &hit);
+    }
+  }
 
   let fadeIn = 1.0 - smoothstep(0.0, 25.0, uniforms[3]);
   let fadeOut = smoothstep(300.0 - 25.0, 300.0, uniforms[3]);
-  return vec4f(pow(filmicToneACES(mix(hit.col, vec3f(0.0), fadeIn + fadeOut)), vec3f(0.4545)), 1.0);
+  return vec4f(pow(filmicToneACES(mix(col, vec3f(0), fadeIn + fadeOut)), vec3f(0.4545)), 1.0);
 }
