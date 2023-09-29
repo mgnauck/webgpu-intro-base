@@ -1,20 +1,15 @@
 const FULLSCREEN = false;
-const BPM = 120;
 
 const CANVAS_WIDTH = 1024; // Careful, this is also hardcoded in the shader!!
 const CANVAS_HEIGHT = CANVAS_WIDTH / 1.77;
-
-const BUFFER_DIM = 256; // Used for audio buffer and grid buffer
 
 let audioContext;
 let audioBufferSourceNode;
 
 let device;
 let uniformBuffer;
-let gridBuffer = [];
 let rulesBuffer;
 let bindGroup = [];
-let pipelineLayout;
 let computePipeline;
 let renderPipeline;
 let renderPassDescriptor;
@@ -23,7 +18,6 @@ let canvas;
 let context;
 
 let startTime;
-let timeInBeats = 0;
 let lastSimulationUpdateTime = 0;
 let simulationIteration = 0;
 let activeScene = -1;
@@ -121,10 +115,10 @@ function encodeRenderPassAndSubmit(commandEncoder, passDescriptor, pipeline, bin
 async function createAudioResources()
 {
   audioContext = new AudioContext();
-  webAudioBuffer = audioContext.createBuffer(2, BUFFER_DIM ** 3, audioContext.sampleRate);
+  let webAudioBuffer = audioContext.createBuffer(2, 256 ** 3, audioContext.sampleRate);
 
   let audioBuffer = device.createBuffer({
-    size: (BUFFER_DIM ** 3) * 2 * 4,
+    size: (256 ** 3) * 8,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC});
 
   // Will be reused by visual shader
@@ -146,7 +140,7 @@ async function createAudioResources()
     ]});
 
   let audioReadBuffer = device.createBuffer({
-    size: (BUFFER_DIM ** 3) * 2 * 4,
+    size: (256 ** 3) * 8,
     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST});
 
   let audioPipelineLayout = device.createPipelineLayout({bindGroupLayouts: [audioBindGroupLayout]});
@@ -159,7 +153,7 @@ async function createAudioResources()
 
   encodeComputePassAndSubmit(commandEncoder, pipeline, audioBindGroup);
 
-  commandEncoder.copyBufferToBuffer(audioBuffer, 0, audioReadBuffer, 0, (BUFFER_DIM ** 3) * 2 * 4);
+  commandEncoder.copyBufferToBuffer(audioBuffer, 0, audioReadBuffer, 0, (256 ** 3) * 8);
 
   device.queue.submit([commandEncoder.finish()]);
 
@@ -169,7 +163,7 @@ async function createAudioResources()
   let channel0 = webAudioBuffer.getChannelData(0);
   let channel1 = webAudioBuffer.getChannelData(1);
 
-  for(let i=0; i<BUFFER_DIM ** 3; i++) {
+  for(let i=0; i<256 ** 3; i++) {
     channel0[i] = audioData[(i << 1) + 0];
     channel1[i] = audioData[(i << 1) + 1];
   }
@@ -191,10 +185,11 @@ async function createRenderResources()
       {binding: 3, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: {type: "read-only-storage"}},
     ]
   });
- 
+
+  let gridBuffer = [];
   for(let i=0; i<2; i++)
     gridBuffer[i] = device.createBuffer({
-      size: (BUFFER_DIM ** 3) * 4,
+      size: (256 ** 3) * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   rulesBuffer = device.createBuffer({
@@ -213,12 +208,12 @@ async function createRenderResources()
     });
   }
 
-  pipelineLayout = device.createPipelineLayout({bindGroupLayouts: [bindGroupLayout]});
+  let pipelineLayout = device.createPipelineLayout({bindGroupLayouts: [bindGroupLayout]});
 
   renderPassDescriptor = {
     colorAttachments: [{
       undefined, // view
-      clearValue: {r: 1.0, g: 0.0, b: 0.0, a: 1.0},
+      //clearValue: {r: 1.0, g: 0.0, b: 0.0, a: 1.0},
       loadOp: "clear",
       storeOp: "store"
     }]
@@ -227,6 +222,21 @@ async function createRenderResources()
   let shaderModule = device.createShaderModule({code: VISUAL_SHADER});
   computePipeline = await createComputePipeline(shaderModule, pipelineLayout);
   renderPipeline = await createRenderPipeline(shaderModule, pipelineLayout);
+
+  // Set grid
+  let rand = xorshift32(4079287172);
+  const area = 24;
+  const pos = 128 - area / 2;
+  let grid = new Uint32Array(area);
+  for(let k=0; k<area; k++) {
+    for(let j=0; j<area; j++) { 
+      for(let i=0; i<area; i++)
+        grid[i] = rand() > 0.6 ? 1 : 0;
+      let ofs = (256 ** 2) * (pos + k) + 256 * (pos + j) + pos;
+      device.queue.writeBuffer(gridBuffer[0], ofs * 4, grid);
+      device.queue.writeBuffer(gridBuffer[1], ofs * 4, grid);
+    }
+  }
 }
 
 let last;
@@ -246,8 +256,8 @@ function render(time)
   }
 
   // Current time
-  timeInBeats = (audioContext.currentTime - startTime) * BPM / 60;
-  if(timeInBeats >= SCENES.at(-1).t)
+  let timeInBeats = (audioContext.currentTime - startTime) * 2; // BPM / 60
+  if(timeInBeats >= 300) //SCENES.at(-1).t
     return;
 
   // Scene update
@@ -265,14 +275,14 @@ function render(time)
   if(timeInBeats - lastSimulationUpdateTime > SCENES[activeScene].d) {
     encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2]); 
     simulationIteration++;
-    lastSimulationUpdateTime = (audioContext.currentTime - startTime) * BPM / 60;
+    lastSimulationUpdateTime = (audioContext.currentTime - startTime) * 2; // BPM / 60
   }
 
   // Camera
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
     curr.p + (next.p - curr.p) * t, // radius
     ((activeScene % 2) ? 1 : -1) * t * 2 * Math.PI, // phi
-    (0.9 + 0.3 * Math.sin(timeInBeats * 0.2)) * Math.sin(timeInBeats * 0.05), // theta
+    (0.8 + 0.3 * Math.sin(timeInBeats * 0.2)) * Math.sin(timeInBeats * 0.05), // theta
     timeInBeats]));
 
   // Render
@@ -283,22 +293,6 @@ function render(time)
 
   requestAnimationFrame(render);
 }
-
-function setGrid(area)
-{
-  let rand = xorshift32(4079287172);
-  const pos = BUFFER_DIM / 2 - area / 2;
-  let grid = new Uint32Array(area);
-  for(let k=0; k<area; k++) {
-    for(let j=0; j<area; j++) { 
-      for(let i=0; i<area; i++)
-        grid[i] = rand() > 0.6 ? 1 : 0;
-      let ofs = (BUFFER_DIM ** 2) * (pos + k) + BUFFER_DIM * (pos + j) + pos;
-      device.queue.writeBuffer(gridBuffer[0], ofs * 4, grid);
-      device.queue.writeBuffer(gridBuffer[1], ofs * 4, grid);
-    }
-  }
-} 
 
 function startRender()
 {
@@ -327,7 +321,6 @@ async function main()
 
   await createAudioResources();
   await createRenderResources();
-  setGrid(24);
 
   document.body.innerHTML = "<button>CLICK<canvas style='width:0;cursor:none'>";
   canvas = document.querySelector("canvas");
