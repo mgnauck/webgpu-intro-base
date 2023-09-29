@@ -1,7 +1,6 @@
 struct Hit
 {
   index: i32,
-  pos: vec3f,
   norm: vec3f,
   state: u32,
   dist: f32,
@@ -26,9 +25,8 @@ fn getCell(x: i32, y: i32, z: i32) -> u32
 
 fn getMooreNeighbourCountWrap(pos: vec3i) -> u32
 {
-  let res = gridMul.y;
-  let dec = vec3i((pos.x - 1) % res, (pos.y - 1) % res, (pos.z - 1) % res);
-  let inc = vec3i((pos.x + 1) % res, (pos.y + 1) % res, (pos.z + 1) % res);
+  let dec = vec3i((pos.x - 1) % gridMul.y, (pos.y - 1) % gridMul.y, (pos.z - 1) % gridMul.y);
+  let inc = vec3i((pos.x + 1) % gridMul.y, (pos.y + 1) % gridMul.y, (pos.z + 1) % gridMul.y);
 
   return  getCell(pos.x, inc.y, pos.z) +
           getCell(inc.x, inc.y, pos.z) +
@@ -98,7 +96,7 @@ fn intersectAabb(minExt: vec3f, maxExt: vec3f, ori: vec3f, invDir: vec3f, tmin: 
   *tmin = maxComp(min(t0, t1));
   *tmax = minComp(max(t0, t1));
 
-  return *tmin <= *tmax && *tmax > 0.0;
+  return *tmin <= *tmax && *tmax > 0;
 }
 
 fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, hit: ptr<function, Hit>) -> bool
@@ -107,18 +105,18 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, hit: ptr<function, Hit>) -
   var t = (vec3f(0.5) + 0.5 * stepDir - fract(ori)) * invDir;
   var mask = vec3f(0);
 
-  (*hit).dist = 0.0;
-  (*hit).index = i32(dot(gridMulF, floor(vec3f(gridMulF.y / 2) + ori)));
+  (*hit).dist = 0;
+  (*hit).index = i32(dot(gridMulF, floor(vec3f(gridMulF.y * 0.5) + ori)));
   
   loop {
     (*hit).state = grid[(*hit).index];
-    if((*hit).state > 0) {
+    if (*hit).state > 0 {
       (*hit).norm = mask * -stepDir;
       return true;
     }
 
     (*hit).dist = minComp(t);
-    if((*hit).dist >= tmax) {
+    if (*hit).dist >= tmax {
       return false;
     }
  
@@ -155,9 +153,9 @@ fn calcOcclusion(pos: vec3f, index: i32, norm: vec3i) -> f32
   let uvInv = vec2f(1) - uv;
 
   let edgeOcc = edgeCellStates * vec4f(uv.x, uvInv.x, uv.y, uvInv.y);
-  let cornerOcc = cornerCellStates * vec4f(uv.x * uv.y, uvInv.x * uv.y, uv.x * uvInv.y, uvInv.x * uvInv.y) * (vec4f(1.0) - edgeCellStates.xzwy) * (vec4f(1.0) - edgeCellStates.zyxw);
+  let cornerOcc = cornerCellStates * vec4f(uv.x * uv.y, uvInv.x * uv.y, uv.x * uvInv.y, uvInv.x * uvInv.y) * (vec4f(1) - edgeCellStates.xzwy) * (vec4f(1) - edgeCellStates.zyxw);
 
-  return 1.0 - (edgeOcc.x + edgeOcc.y + edgeOcc.z + edgeOcc.w + cornerOcc.x + cornerOcc.y + cornerOcc.z + cornerOcc.w) * 0.5;
+  return 1 - (edgeOcc.x + edgeOcc.y + edgeOcc.z + edgeOcc.w + cornerOcc.x + cornerOcc.y + cornerOcc.z + cornerOcc.w) * 0.5;
 }
 
 fn shade(pos: vec3f, dir: vec3f, tmax: f32, hit: ptr<function, Hit>) -> vec3f
@@ -166,14 +164,14 @@ fn shade(pos: vec3f, dir: vec3f, tmax: f32, hit: ptr<function, Hit>) -> vec3f
   /*let border = vec3f(0.5 - 0.05);
   let wire = (vec3f(1) - abs((*hit).norm)) * abs(fract(pos) - vec3f(0.5));
 
-  if(any(vec3<bool>(step(border, wire)))) {
+  if any(vec3<bool>(step(border, wire))) {
     return vec3f(0);
   }*/
 
   let cnt = f32(rules[0]);
   let val = cnt / min(f32((*hit).state), cnt);
   let sky = 0.4 + (*hit).norm.y * 0.6;
-  let col = vec3f(0.005) + (1.0 - 0.15 * (cnt - 5.0)) * (vec3f(0.5) + pos / gridMulF.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / tmax);
+  let col = vec3f(0.005) + (1 - 0.15 * (cnt - 5.0)) * (vec3f(0.5) + pos / gridMulF.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / tmax);
   let occ = calcOcclusion(pos, (*hit).index, vec3i((*hit).norm));
 
   return col * occ * occ * occ;
@@ -210,23 +208,23 @@ fn fM(@builtin(position) position: vec4f) -> @location(0) vec4f
 
   var dir = ri * dirEyeSpace.x - up * dirEyeSpace.y + fwd * dirEyeSpace.z;
 
-  let halfGrid = vec3f(gridMulF.y / 2);
-  let invDir = 1.0 / dir;
+  let halfGrid = vec3f(gridMulF.y * 0.5);
+  let invDir = 1 / dir;
 
   var tmin: f32;
   var tmax: f32;
   var col = vec3f(0);
   var hit: Hit;
 
-  if(intersectAabb(-halfGrid, halfGrid, ori, invDir, &tmin, &tmax)) {
-    tmin = max(tmin + 0.001, 0.0); // EPSILON 0.001
+  if intersectAabb(-halfGrid, halfGrid, ori, invDir, &tmin, &tmax) {
+    tmin = max(tmin + 0.001, 0); // EPSILON 0.001
     tmax = tmax - 0.001 - tmin;
-    if(traverseGrid(ori + tmin * dir, invDir, tmax, &hit)) {
+    if traverseGrid(ori + tmin * dir, invDir, tmax, &hit) {
       col = shade(ori + (tmin + hit.dist) * dir, dir, tmax, &hit);
     }
   }
 
-  let fadeIn = 1.0 - smoothstep(0.0, 25.0, uniforms[3]);
-  let fadeOut = smoothstep(300.0 - 25.0, 300.0, uniforms[3]);
-  return vec4f(pow(filmicToneACES(mix(col, vec3f(0), fadeIn + fadeOut)), vec3f(0.4545)), 1.0);
+  let fadeIn = 1 - smoothstep(0, 30, uniforms[3]);
+  let fadeOut = smoothstep(300 - 30, 300, uniforms[3]);
+  return vec4f(pow(filmicToneACES(mix(col, vec3f(0), fadeIn + fadeOut)), vec3f(0.5)), 1);
 }
