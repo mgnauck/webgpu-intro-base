@@ -193,7 +193,7 @@ async function createRenderResources()
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   rulesBuffer = device.createBuffer({
-    size: RULES.length * 4,
+    size: 385 * 4, //RULES.length * 4,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   for(let i=0; i<2; i++) {
