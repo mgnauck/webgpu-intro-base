@@ -21,7 +21,7 @@ cd $output_dir
 
 sed -f ../compress.sed ../$infile > ${infile_name}_with_shaders.${infile_ext}
 
-terser ${infile_name}_with_shaders.${infile_ext} --mangle --rename --toplevel --c toplevel,passes=5,unsafe=true,pure_getters=true > ${infile_name}_minified.${infile_ext}
+terser ${infile_name}_with_shaders.${infile_ext} -m -c toplevel,passes=5,drop_console=true,unsafe=true,pure_getters=true,keep_fargs=false,booleans_as_integers=true --toplevel > ${infile_name}_minified.${infile_ext}
 
 ../js-payload-compress ${infile_name}_minified.${infile_ext} ${infile_name}_compressed.html
 
