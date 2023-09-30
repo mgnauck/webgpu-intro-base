@@ -1,6 +1,6 @@
 //const FULLSCREEN = false;
 
-const CANVAS_WIDTH = 1920; // Careful, this is also hardcoded in the shader!!
+const CANVAS_WIDTH = 1920;
 const CANVAS_HEIGHT = 1080;
 
 let audioContext;
