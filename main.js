@@ -91,16 +91,16 @@ const RULES_NAMES = [
 
 // Rule set indices are +1 in main compared to player!!
 const SCENES = [
-  { t: 0, r: 3, d: 0.2, p: 25 }, // amoeba
-  { t: 40, r: 4, d: 0.5, p: 320 }, // pyro
-  { t: 60, r: 3, d: 0.6, p: 220 }, // amoeba
-  { t: 80, r: 1, d: 1.0, p: 180  }, // clouds
-  { t: 110, r: 7, d: 0.75, p: 160 }, // ripple
-  { t: 150, r: 4, d: 0.875, p: 190 }, // pyro (trim down)
-  { t: 155, r: 5, d: 0.2, p: 180 }, // framework
-  { t: 190, r: 6, d: 0.3, p: 160 }, // spiky
-  { t: 220, r: 2, d: 0.4, p: 150 }, // 445
-  { t: 300, r: 2, d: 0.4, p: 190 }
+  0, 3, 0.2, 25, // amoeba
+  40, 4, 0.5, 320, // pyro
+  60, 3, 0.6, 220, // amoeba
+  80, 1, 1.0, 180, // clouds
+  110, 7, 0.75, 160, // ripple
+  150, 4, 0.875, 190, // pyro (trim down)
+  155, 5, 0.2, 180, // framework
+  190, 6, 0.3, 160, // spiky
+  220, 2, 0.4, 150, // 445
+  300, 2, 0.4, 190
 ];
 
 function loadTextFile(url)
@@ -388,24 +388,17 @@ function setPerformanceTimer(timerName)
 
 function update()
 {
-  if(activeScene + 1 < SCENES.length) {
-    if(timeInBeats >= SCENES[activeScene + 1].t) {
-      let s = SCENES[++activeScene];
-    
-      if(s.r !== undefined)
-        setRules(s.r);
-    
-      if(s.d !== undefined)
-        setTime(s.d);
-
-      view[0] = s.p;
+  if(activeScene + 1 < SCENES.length / 4) {
+    if(timeInBeats >= SCENES[4 * (activeScene + 1)]) {
+      activeScene++;
+      setRules(SCENES[4 * activeScene + 1]);
+      setTime(SCENES[4 * activeScene + 2]);
+      view[0] = SCENES[4 * activeScene + 3];
       recordCameraEvent();
     }
 
-    let curr = SCENES[activeScene];
-    let next = SCENES[activeScene + 1];
-    let t = (timeInBeats - curr.t) / (next.t - curr.t);
-    view[0] = curr.p + (next.p - curr.p) * t;
+    let t = (timeInBeats - SCENES[4 * activeScene]) / (SCENES[4 * (activeScene + 1)] - SCENES[4 * activeScene]);
+    view[0] = SCENES[4 * activeScene + 3] + (SCENES[4 * (activeScene + 1) + 3] - SCENES[4 * activeScene + 3]) * t;
     view[1] = ((activeScene % 2) ? 1 : -1) * t * 2 * Math.PI;
     view[2] = (0.9 + 0.3 * Math.sin(timeInBeats * 0.2)) * Math.sin(timeInBeats * 0.05);
   }
@@ -449,17 +442,17 @@ function setTime(d)
 
 function recordRulesEvent(r)
 {
-  console.log(`{ t: ${timeInBeats.toFixed(2)}, r: ${r} }, // ${RULES_NAMES[Math.abs(r)]}`);
+  console.log(`${timeInBeats.toFixed(2)}, ${r}, // Rule set event: ${RULES_NAMES[Math.abs(r)]}`);
 }
 
 function recordTimeEvent(d)
 {
-  console.log(`{ t: ${timeInBeats.toFixed(2)}, d: ${d.toFixed(2)} },`);
+  console.log(`${timeInBeats.toFixed(2)}, ${d.toFixed(2)}, // Time delta event`);
 }
 
 function recordCameraEvent()
 {
-  console.log(`{ t: ${timeInBeats.toFixed(2)}, p: ${view[0].toFixed(1)} },`);
+  console.log(`${timeInBeats.toFixed(2)}, ${view[0].toFixed(1)}, // Camera event`);
 }
 
 async function handleKeyEvent(e)
