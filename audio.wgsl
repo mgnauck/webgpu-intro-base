@@ -172,7 +172,7 @@ fn cM(@builtin(global_invocation_id) globalId: vec3u)
   // party special
   if time >= 75 && time < 77.5
   {
-    output = vec2(0.3 * noise(time).x);
+    output += 0.1 * noise(time).xy;
   }
 
   // global fade in-/out
