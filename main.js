@@ -50,9 +50,8 @@ let view = []; // radius, phi, theta
 let programmableValue;
 
 let rand;
-let gridRes;
+let gridRes = MAX_GRID_RES;
 let updateDelay;
-let grid;
 
 let startTime;
 let timeInBeats = 0;
@@ -92,7 +91,7 @@ const RULES_NAMES = [
 
 // Rule set indices are +1 in main compared to player!!
 const SCENES = [
-  { t: 0, r: 3, d: 0.2, p: 30 }, // amoeba
+  { t: 0, r: 3, d: 0.2, p: 25 }, // amoeba
   { t: 40, r: 4, d: 0.5, p: 320 }, // pyro
   { t: 60, r: 3, d: 0.6, p: 220 }, // amoeba
   { t: 80, r: 1, d: 1.0, p: 180  }, // clouds
@@ -103,18 +102,6 @@ const SCENES = [
   { t: 220, r: 2, d: 0.4, p: 150 }, // 445
   { t: 300, r: 2, d: 0.4, p: 190 }
 ];
-
-// https://github.com/bryc/code/blob/master/jshash/PRNGs.md
-function xorshift32(a)
-{
-  return function()
-  {
-    a ^= a << 13;
-    a ^= a >>> 17;
-    a ^= a << 5;
-    return (a >>> 0) / 4294967296;
-  }
-}
 
 function loadTextFile(url)
 {
@@ -294,7 +281,7 @@ async function createRenderResources()
 
   for(let i=0; i<2; i++)
     gridBuffer[i] = device.createBuffer({
-      size: grid.length * 4,
+      size: (gridRes ** 3) * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   rulesBuffer = device.createBuffer({
@@ -429,25 +416,19 @@ function resetView()
   view = [gridRes * 0.5, Math.PI * 0.5, 0];
 }
 
-function setGrid(area, prob, seed)
+function setGrid(area)
 {
-  for(let i=0; i<grid.length; i++)
-    grid[i] = 0;
-
-  gridRes = MAX_GRID_RES;
-
-  const center = gridRes * 0.5;
-  const d = Math.ceil(area / 2);
-
-  rand = xorshift32(seed);
-
-  for(let k=center - d; k<center + d; k++)
-    for(let j=center - d; j<center + d; j++)
-      for(let i=center - d; i<center + d; i++)
-        grid[(gridRes ** 2) * k + gridRes * j + i] =  rand() > prob ? 1 : 0;
-
-  device.queue.writeBuffer(gridBuffer[0], 0, grid);
-  device.queue.writeBuffer(gridBuffer[1], 0, grid);
+  const pos = gridRes / 2 - area / 2;
+  let grid = new Uint32Array(area);
+  for(let k=0; k<area; k++) {
+    for(let j=0; j<area; j++) { 
+      for(let i=0; i<area; i++)
+        grid[i] = Math.min(1, RULES[(area * (k ^ j) + (i ^ k)) % 385]); // 385 is 7 rules * (2 * 27 + 1)
+      let ofs = (gridRes ** 2) * (pos + k) + gridRes * (pos + j) + pos;
+      device.queue.writeBuffer(gridBuffer[0], ofs * 4, grid);
+      device.queue.writeBuffer(gridBuffer[1], ofs * 4, grid);
+    }
+  }
 }
 
 function setRules(r)
@@ -502,11 +483,6 @@ async function handleKeyEvent(e)
     case "l":
       createPipelines();
       console.log("Visual shader reloaded");
-      break;
-    case "i":
-      let seed = rand() * 4294967296;
-      console.log("Initialized new grid with seed " + seed);
-      setGrid(22, 0.7, seed);
       break;
     case "Enter":
       recording = !recording;
@@ -649,12 +625,9 @@ async function main()
     await renderAudio();
   }
 
-  // Grid mul + grid
-  grid = new Uint32Array(MAX_GRID_RES * MAX_GRID_RES * MAX_GRID_RES);
-  
   await createRenderResources();
   await createPipelines();
-  setGrid(24, 0.6, 4079287172);
+  setGrid(24);
 
   if(idle || recording)
     resetView();

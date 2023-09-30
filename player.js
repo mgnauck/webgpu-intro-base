@@ -34,7 +34,7 @@ const RULES = new Uint32Array([
 
 // Rule set indices are -1 in player compared to main!!
 const SCENES = [
-  { t: 0, r: 2, d: 0.2, p: 30 }, // amoeba
+  { t: 0, r: 2, d: 0.2, p: 25 }, // amoeba
   { t: 40, r: 3, d: 0.5, p: 320 }, // pyro
   { t: 60, r: 2, d: 0.6, p: 220 }, // amoeba
   { t: 80, r: 0, d: 1.0, p: 180  }, // clouds
@@ -53,18 +53,6 @@ REPLACE_ME_AUDIO
 const VISUAL_SHADER = `
 REPLACE_ME_VISUAL
 `;
-
-// https://github.com/bryc/code/blob/master/jshash/PRNGs.md
-function xorshift32(a)
-{
-  return function()
-  {
-    a ^= a << 13;
-    a ^= a >>> 17;
-    a ^= a << 5;
-    return (a >>> 0) / 4294967296;
-  }
-}
 
 async function createComputePipeline(shaderModule, pipelineLayout)
 {
@@ -103,7 +91,7 @@ function encodeComputePassAndSubmit(commandEncoder, pipeline, bindGroup)
   passEncoder.end();
 }
 
-function encodeRenderPassAndSubmit(commandEncoder, passDescriptor, pipeline, bindGroup)
+function encodeRenderPassAndSubmit(commandEncoder, pipeline, bindGroup, passDescriptor)
 {
   const passEncoder = commandEncoder.beginRenderPass(passDescriptor);
   passEncoder.setPipeline(pipeline);
@@ -222,16 +210,15 @@ async function createRenderResources()
   let shaderModule = device.createShaderModule({code: VISUAL_SHADER});
   computePipeline = await createComputePipeline(shaderModule, pipelineLayout);
   renderPipeline = await createRenderPipeline(shaderModule, pipelineLayout);
-
+  
   // Set grid
-  let rand = xorshift32(4079287172);
   const area = 24;
   const pos = 128 - area / 2;
   let grid = new Uint32Array(area);
   for(let k=0; k<area; k++) {
     for(let j=0; j<area; j++) { 
       for(let i=0; i<area; i++)
-        grid[i] = rand() > 0.6 ? 1 : 0;
+        grid[i] = Math.min(1, RULES[(area * (k ^ j) + (i ^ k)) % 385]);
       let ofs = (256 ** 2) * (pos + k) + 256 * (pos + j) + pos;
       device.queue.writeBuffer(gridBuffer[0], ofs * 4, grid);
       device.queue.writeBuffer(gridBuffer[1], ofs * 4, grid);
@@ -287,7 +274,7 @@ function render(time)
 
   // Render
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
-  encodeRenderPassAndSubmit(commandEncoder, renderPassDescriptor, renderPipeline, bindGroup[simulationIteration % 2]);
+  encodeRenderPassAndSubmit(commandEncoder, renderPipeline, bindGroup[simulationIteration % 2], renderPassDescriptor);
   
   device.queue.submit([commandEncoder.finish()]);
 

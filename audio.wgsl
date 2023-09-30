@@ -1,4 +1,4 @@
-const BPM = 120.0;
+const BPM = 130.0;
 const PI = 3.141592654;
 const TAU = 6.283185307;
 const TIME_PER_BEAT = 60.0 / BPM / 4.0;
