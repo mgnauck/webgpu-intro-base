@@ -1,40 +1,29 @@
-const BPM = 125.0;
-const PI = 3.141592654;
-const TAU = 6.283185307;
-const TIME_PER_BEAT = 60.0 / BPM / 4.0;
-const TIME_PER_PATTERN = 60.0 / BPM * 4.0;
+const PI = 3.1415;
+const TAU = 2 * PI;
+const TIME_PER_BEAT = 60 / 125 / 4;
+const TIME_PER_PATTERN = 60 / 125 * 4;
 const PATTERN_COUNT = 120;
 const KICK = 0;
 const HIHAT = 1;
 const BASS = 2;
 const DURCH = 3;
 
-// Suboptimal random (ripped from somewhere)
-fn rand2(co: vec2f) -> f32
-{
-  return fract(sin(dot(co, vec2f(12.9898, 78.233))) * 43758.5453);
-}
-
 fn noise(phase: f32) -> vec4f
 {
   let uv = phase / vec2f(0.512, 0.487);
-  return vec4f(rand2(uv));
+  return vec4f(fract(sin(dot(uv, vec2f(12.9898, 78.233))) * 43758.5453));
 }
 
 fn hihat(time: f32, freq: f32) -> f32
 {
-  let dist = 0.85;
-  let out = noise(time * freq).x;
-  let env = exp(-60.0 * time);
-  let hihat = atan2(out, 1.0 - dist);
-  return hihat * env; 
+  return atan2(noise(time * freq).x, 0.15) * exp(-60 * time); 
 }
 
 fn bass3(time: f32, freq: f32) -> f32
 {
-  if(time < 0.0)
+  if(time < 0)
   {
-    return 0.0;
+    return 0;
   }
 
   return sin(time * TAU * freq) * smoothstep(0, 1, time*16) * exp(-1 * time);
@@ -44,21 +33,13 @@ fn bass3(time: f32, freq: f32) -> f32
 // https://www.shadertoy.com/view/7lpatternIndexczz
 fn kick(time: f32, freq: f32) -> f32
 {
-  if(time < 0.0)
+  if(time < 0)
   {
-    return 0.0;
+    return 0;
   }
 
-  let phase = freq * time - 8.0 * exp(-20.0 * time) - 3.0 * exp(-800.0 * time);
-  let env = exp(-5.0 * time);
-  let kick = atan2(sin(TAU * phase), 0.4);
-
-  return kick * env;
-}
-
-fn sine(time: f32, freq: f32) -> f32
-{
-  return sin(time * TAU * freq);
+  let phase = freq * time - 8 * exp(-20 * time) - 3 * exp(-800 * time);
+  return atan2(sin(TAU * phase), 0.4) * exp(-5 * time);
 }
 
 fn sample1(gTime: f32, time: f32, freq: f32) -> f32
@@ -73,20 +54,19 @@ fn sample1(gTime: f32, time: f32, freq: f32) -> f32
     let lfo3 = sin(gTime * v * TAU * 0.05) * 0.1;
     let detune = lfo3 * v;
     let f0 = freq * (v*0.5);
-    //out += (1.0/voices) * sine(time, f0+detune+lfo-55.0);
-    out += 0.1 * sin(TAU * time * (f0+detune+lfo-55.0));
+    out += 0.1 * sin(TAU * time * (f0+detune+lfo-55));
   }
 
   out = atan2(out, 1.0-lfo2*0.2);
 
-  return out * smoothstep(0, 1, time*8) * exp(-2.0*time);
+  return out * smoothstep(0, 1, time*8) * exp(-2*time);
 }
 
 fn sample1lpf(gTime: f32, time: f32, freq: f32) -> f32
 {
   let c = 0.8 - (sin(gTime * TAU * 0.001) * 0.3);
   let r = 0.8 - cos(gTime * TAU * 0.1) * 0.4;
-  let dt = 1.0/f32(params[0]);
+  let dt = 1/f32(params[0]);
 
   var v0 = 0.0;
   var v1 = 0.0;
@@ -156,44 +136,44 @@ fn cM(@builtin(global_invocation_id) globalId: vec3u)
   var output = vec2(0.0);
 
   // 60/125*120 = 57,6 = 58 patterns
-  if(isPattern(time, 4, 120))
+  if(isPattern(time, 4, PATTERN_COUNT))
   {
-    output += addSample(DURCH, time, patternTime,  0, 0.5, 55.00, 0.8 );
+    output += addSample(DURCH, time, patternTime,  0, 0.5, 55, 0.8 );
   }
 
   // always
-  output += addSample(DURCH, time, patternTime,  2, 1.0, 110.00, 0.9 );    
+  output += addSample(DURCH, time, patternTime,  2, 1.0, 110, 0.9 );    
 
   // bass
-  if(isPattern(time, 8, 120))
+  if(isPattern(time, 10, PATTERN_COUNT))
   {
-    output += addSample(BASS, time, patternTime,   2, 0.25, 110.0, 0.4 );
-    output += addSample(BASS, time, patternTime,   6, 0.25, 110.0, 0.3 );
-    output += addSample(BASS, time, patternTime,  10, 0.25, 110.0, 0.4 );
-    output += addSample(BASS, time, patternTime,  14, 0.125, 110.0, 0.2 );
+    output += addSample(BASS, time, patternTime,   2, 0.25, 110, 0.4 );
+    output += addSample(BASS, time, patternTime,   6, 0.25, 110, 0.3 );
+    output += addSample(BASS, time, patternTime,  10, 0.25, 110, 0.4 );
+    output += addSample(BASS, time, patternTime,  14, 0.125, 110, 0.2 );
   }
 
   // hihat + kick
-  if(isPattern(time, 7, 8))
+  if(isPattern(time, 10, 11))
   {
-   output += addSample(KICK, time, patternTime,  14, 1.0, 55.0, 0.5 );
+   output += addSample(KICK, time, patternTime,  14, 1, 55, 0.5 );
   }
 
-  if(isPattern(time, 8, 120))
+  if(isPattern(time, 10, PATTERN_COUNT))
   {
-   output += addSample(KICK, time, patternTime,  0, 1.0, 55.0, 0.4 );
-   output += addSample(KICK, time, patternTime,  4, 1.0, 55.0, 0.5 );
-   output += addSample(KICK, time, patternTime,  8, 1.0, 55.0, 0.4 );
-   output += addSample(KICK, time, patternTime, 12, 1.0, 55.0, 0.5 );
-   output += addSample(HIHAT, time, patternTime,  0, 0.1, 55.0, 0.3);
-   output += addSample(HIHAT, time, patternTime,  4, 0.1, 55.0, 0.15);
-   output += addSample(HIHAT, time, patternTime,  8, 0.1, 55.0, 0.20);
-   output += addSample(HIHAT, time, patternTime, 12, 0.1, 55.0, 0.15);
-   output += addSample(HIHAT, time, patternTime, 15, 0.2, 55.0, 0.13);
+   output += addSample(KICK, time, patternTime,  0, 1, 55, 0.4 );
+   output += addSample(KICK, time, patternTime,  4, 1, 55, 0.5 );
+   output += addSample(KICK, time, patternTime,  8, 1, 55, 0.4 );
+   output += addSample(KICK, time, patternTime, 12, 1, 55, 0.5 );
+   output += addSample(HIHAT, time, patternTime,  0, 0.1, 55, 0.3);
+   output += addSample(HIHAT, time, patternTime,  4, 0.1, 55, 0.15);
+   output += addSample(HIHAT, time, patternTime,  8, 0.1, 55, 0.20);
+   output += addSample(HIHAT, time, patternTime, 12, 0.1, 55, 0.15);
+   output += addSample(HIHAT, time, patternTime, 15, 0.2, 55, 0.13);
   }
 
   // global fade in-/out
-  output *= mix(0, smoothstep(0, 3, time), smoothstep(150, 147, time));
+  output *= mix(0, smoothstep(0, 3, time), smoothstep(150, 138, time));
 
   // Write 2 floats between -1 and 1 to output buffer (stereo)
   buffer[sample] = clamp(output, vec2f(-1), vec2f(1));
