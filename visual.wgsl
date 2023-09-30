@@ -6,8 +6,8 @@ struct Hit
   dist: f32,
 }
 
-const WIDTH = 1024;
-const HEIGHT = WIDTH / 1.77;
+//const WIDTH = 1024;
+//const HEIGHT = WIDTH / 1.77;
 
 const gridMul = vec3i(1, 256, 256 * 256);
 const gridMulF = vec3f(gridMul);
@@ -194,7 +194,8 @@ fn vM(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f
 @fragment
 fn fM(@builtin(position) pos: vec4f) -> @location(0) vec4f
 {
-  let dirEyeSpace = normalize(vec3f((pos.xy - vec2f(WIDTH, HEIGHT) * 0.5) / HEIGHT, 1 /* FOV */));
+  let dirEyeSpace = normalize(vec3f((pos.xy - vec2f(1920, 1080) * 0.5) / 1080, 1 /* FOV */));
+  //let dirEyeSpace = normalize(vec3f((pos.xy - vec2f(1024, 578) * 0.5) / 578, 1 /* FOV */));
 
   let ori = vec3f(uniforms[0] * cos(uniforms[2]) * cos(uniforms[1]), uniforms[0] * sin(uniforms[2]), uniforms[0] * cos(uniforms[2]) * sin(uniforms[1]));
 

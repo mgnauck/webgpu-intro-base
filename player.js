@@ -1,7 +1,7 @@
-const FULLSCREEN = false;
+//const FULLSCREEN = false;
 
-const CANVAS_WIDTH = 1024; // Careful, this is also hardcoded in the shader!!
-const CANVAS_HEIGHT = CANVAS_WIDTH / 1.77;
+const CANVAS_WIDTH = 1920; // Careful, this is also hardcoded in the shader!!
+const CANVAS_HEIGHT = 1080;
 
 let audioContext;
 let audioBufferSourceNode;
@@ -36,7 +36,7 @@ const RULES = new Uint32Array([
 // Time, rule, delta, radius
 const SCENES = [
   0, 2, 0.2, 25, // amoeba
-  40, 3, 0.5, 320, // pyro
+  38, 3, 0.5, 320, // pyro
   60, 2, 0.6, 220, // amoeba
   80, 0, 1.0, 180, // clouds
   110, 6, 0.75, 160, // ripple
@@ -227,15 +227,15 @@ async function createRenderResources()
   }
 }
 
-let last;
+//let last;
 
 function render(time)
 {  
-  if(last !== undefined) {
+  /*if(last !== undefined) {
     let frameTime = (performance.now() - last);
     document.title = `${(frameTime).toFixed(2)} / ${(1000.0 / frameTime).toFixed(2)}`;
   }
-  last = performance.now();
+  last = performance.now();*/
 
   // Initialize time and start audio
   if(startTime === undefined) {
@@ -268,7 +268,7 @@ function render(time)
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
     SCENES[4 * activeScene + 3] + (SCENES[4 * (activeScene + 1) + 3] - SCENES[4 * activeScene + 3]) * t, // radius
     ((activeScene % 2) ? 1 : -1) * t * 2 * Math.PI, // phi
-    (0.8 + 0.3 * Math.sin(timeInBeats * 0.2)) * Math.sin(timeInBeats * 0.05), // theta
+    (0.6 + 0.3 * Math.sin(timeInBeats * 0.2)) * Math.sin(timeInBeats * 0.05), // theta
     timeInBeats]));
 
   // Render
@@ -284,15 +284,15 @@ function startRender()
 {
   document.querySelector("button").removeEventListener("click", startRender);
 
-  if(FULLSCREEN)
+  //if(FULLSCREEN)
     canvas.requestFullscreen();
-  else {
+  /*else {
     canvas.style.width = CANVAS_WIDTH;
     canvas.style.height = CANVAS_HEIGHT;
     canvas.style.position = "absolute";
     canvas.style.left = 0;
     canvas.style.top = 0;
-  }
+  }*/
 
   requestAnimationFrame(render);
 }
