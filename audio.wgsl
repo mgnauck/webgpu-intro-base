@@ -67,11 +67,11 @@ fn sample1lpf(gTime: f32, time: f32, freq: f32) -> f32
 
   var v0 = 0.0;
   var v1 = 0.0;
-  for(var j=0u; j<96; j++)
+  for(var j=0.0; j<96; j+=1)
   {
-    let input = sample1(gTime, time - f32(j)*dt, freq);
-    v0 = (1.0-r*c)*v0 - (c)*v1 + (c)*input;
-    v1 = (1.0-r*c)*v1 + (c)*v0;
+    let input = sample1(gTime, time - j*dt, freq);
+    v0 = (1-r*c)*v0 - (c)*v1 + (c)*input;
+    v1 = (1-r*c)*v1 + (c)*v0;
    }
   
   return v1;
@@ -89,7 +89,7 @@ fn addSample(idx: u32, gTime: f32, time: f32, pat: f32, dur: f32, freq: f32, amp
   // if the duration causes the sound to shutdown we want
   // at least a quick ramp down to zero to not cause a click
   // this seems to work but better double check again!
-  let env = amp * smoothstep(0.0, 0.05, dur-sampleTime);
+  let env = amp * smoothstep(0, 0.05, dur-sampleTime);
 
   if idx == KICK
   {
@@ -108,7 +108,7 @@ fn addSample(idx: u32, gTime: f32, time: f32, pat: f32, dur: f32, freq: f32, amp
     return sample1lpf(gTime, sampleTime, freq) * env;
   }
   
-  return 0.0;
+  return 0;
 }
 
 fn isPattern(time: f32, start: u32, end: u32) -> bool
