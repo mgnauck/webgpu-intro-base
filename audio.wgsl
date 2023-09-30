@@ -33,7 +33,7 @@ fn bass3(time: f32, freq: f32) -> f32
 // https://www.shadertoy.com/view/7lpatternIndexczz
 fn kick(time: f32, freq: f32) -> f32
 {
-  if(time < 0)
+  if time < 0
   {
     return 0;
   }
@@ -47,9 +47,8 @@ fn sample1(gTime: f32, time: f32, freq: f32) -> f32
   let lfo = sin(gTime * TAU * 0.001) * 0.5;
   let lfo2 = sin(gTime * TAU * lfo) * 0.5;
 
-  let voices = 11.0;
   var out = 0.0;
-  for(var v=1.0;v<=voices;v+=1.0)
+  for(var v=1.0; v<=11; v+=1)
   {
     let lfo3 = sin(gTime * v * TAU * 0.05) * 0.1;
     let detune = lfo3 * v;
@@ -57,9 +56,7 @@ fn sample1(gTime: f32, time: f32, freq: f32) -> f32
     out += 0.1 * sin(TAU * time * (f0+detune+lfo-55));
   }
 
-  out = atan2(out, 1.0-lfo2*0.2);
-
-  return out * smoothstep(0, 1, time*8) * exp(-2*time);
+  return atan2(out, 1.0-lfo2*0.2) * smoothstep(0, 1, time*8) * exp(-2*time);
 }
 
 fn sample1lpf(gTime: f32, time: f32, freq: f32) -> f32
@@ -80,13 +77,13 @@ fn sample1lpf(gTime: f32, time: f32, freq: f32) -> f32
   return v1;
 }
 
-fn addSample(idx: u32, gTime: f32, time: f32, pat: u32, dur: f32, freq: f32, amp: f32) -> f32
+fn addSample(idx: u32, gTime: f32, time: f32, pat: f32, dur: f32, freq: f32, amp: f32) -> f32
 {
-  let sampleTime = time - f32(pat) * TIME_PER_BEAT;
+  let sampleTime = time - pat * TIME_PER_BEAT;
 
-  if( sampleTime < 0.0 || sampleTime > dur )
+  if sampleTime < 0 || sampleTime > dur
   {
-    return 0.0;
+    return 0;
   }
 
   // if the duration causes the sound to shutdown we want
@@ -94,19 +91,19 @@ fn addSample(idx: u32, gTime: f32, time: f32, pat: u32, dur: f32, freq: f32, amp
   // this seems to work but better double check again!
   let env = amp * smoothstep(0.0, 0.05, dur-sampleTime);
 
-  if(idx == KICK)
+  if idx == KICK
   {
     return kick(sampleTime, freq) * env;
   }
-  else if(idx == HIHAT)
+  else if idx == HIHAT
   {
     return hihat(sampleTime, freq) * env;
   }
-  else if(idx == BASS)
+  else if idx == BASS
   {
     return bass3(sampleTime, freq) * env;
   }
-  else if(idx == DURCH)
+  else if idx == DURCH
   {
     return sample1lpf(gTime, sampleTime, freq) * env;
   }
@@ -133,19 +130,19 @@ fn cM(@builtin(global_invocation_id) globalId: vec3u)
   let patternTime = time % TIME_PER_PATTERN;
 
   // Samples are calculated in mono and then written to left/right
-  var output = vec2(0.0);
+  var output = vec2f(0);
 
   // 60/125*120 = 57,6 = 58 patterns
-  if(isPattern(time, 4, PATTERN_COUNT))
+  if isPattern(time, 4, PATTERN_COUNT)
   {
-    output += addSample(DURCH, time, patternTime,  0, 0.5, 55, 0.8 );
+    output += addSample(DURCH, time, patternTime, 0, 0.5, 55, 0.8 );
   }
 
   // always
   output += addSample(DURCH, time, patternTime,  2, 1.0, 110, 0.9 );    
 
   // bass
-  if(isPattern(time, 10, PATTERN_COUNT))
+  if isPattern(time, 10, PATTERN_COUNT)
   {
     output += addSample(BASS, time, patternTime,   2, 0.25, 110, 0.4 );
     output += addSample(BASS, time, patternTime,   6, 0.25, 110, 0.3 );
@@ -154,12 +151,12 @@ fn cM(@builtin(global_invocation_id) globalId: vec3u)
   }
 
   // hihat + kick
-  if(isPattern(time, 10, 11))
+  if isPattern(time, 10, 11)
   {
    output += addSample(KICK, time, patternTime,  14, 1, 55, 0.5 );
   }
 
-  if(isPattern(time, 10, PATTERN_COUNT))
+  if isPattern(time, 10, PATTERN_COUNT)
   {
    output += addSample(KICK, time, patternTime,  0, 1, 55, 0.4 );
    output += addSample(KICK, time, patternTime,  4, 1, 55, 0.5 );
