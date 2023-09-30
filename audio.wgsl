@@ -1,7 +1,7 @@
 const PI = 3.1415;
 const TAU = 2 * PI;
-const TIME_PER_BEAT = 60 / 125 / 4;
-const TIME_PER_PATTERN = 60 / 125 * 4;
+const TIME_PER_BEAT = 0.12; // 60.0 / 125.0 / 4.0;
+const TIME_PER_PATTERN = 1.92; // 60.0 / 125.0 * 4.0;
 const PATTERN_COUNT = 120;
 const KICK = 0;
 const HIHAT = 1;
