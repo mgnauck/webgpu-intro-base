@@ -169,6 +169,12 @@ fn cM(@builtin(global_invocation_id) globalId: vec3u)
    output += addSample(HIHAT, time, patternTime, 15, 0.2, 55, 0.13);
   }
 
+  // party special
+  if time >= 75 && time < 77.5
+  {
+    output = vec2(0.3 * noise(time).x);
+  }
+
   // global fade in-/out
   output *= mix(0, smoothstep(0, 3, time), smoothstep(150, 138, time));
 
