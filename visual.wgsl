@@ -6,9 +6,6 @@ struct Hit
   dist: f32,
 }
 
-//const WIDTH = 1024;
-//const HEIGHT = WIDTH / 1.77;
-
 const gridMul = vec3i(1, 256, 256 * 256);
 const gridMulF = vec3f(gridMul);
 
@@ -57,7 +54,7 @@ fn getMooreNeighbourCountWrap(pos: vec3i) -> u32
 }
 
 @compute @workgroup_size(4,4,4)
-fn cM(@builtin(global_invocation_id) globalId: vec3u)
+fn C(@builtin(global_invocation_id) globalId: vec3u)
 {
   let pos = vec3i(globalId);
   let index = dot(pos, gridMul);
@@ -103,8 +100,13 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, hit: ptr<function, Hit>) -
 
   (*hit).dist = 0;
   (*hit).index = i32(dot(gridMulF, floor(vec3f(gridMulF.y * 0.5) + ori)));
-  
+ 
+  var iter = 0;
   loop {
+    if iter > 512 { // Nvidia fix :(
+      return false;
+    }
+
     (*hit).state = grid[(*hit).index];
     if (*hit).state > 0 {
       (*hit).norm = mask * -stepDir;
@@ -122,6 +124,8 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, hit: ptr<function, Hit>) -
 
     t += mask * stepDir * invDir;
     (*hit).index += i32(dot(gridMulF, mask * stepDir));
+    
+    iter++;
   }
 }
 
@@ -156,14 +160,6 @@ fn calcOcclusion(pos: vec3f, index: i32, norm: vec3i) -> f32
 
 fn shade(pos: vec3f, tmax: f32, hit: ptr<function, Hit>) -> vec3f
 {
-  // Wireframe, better add AA
-  /*let border = vec3f(0.5 - 0.05);
-  let wire = (vec3f(1) - abs((*hit).norm)) * abs(fract(pos) - vec3f(0.5));
-
-  if any(vec3<bool>(step(border, wire))) {
-    return vec3f(0);
-  }*/
-
   let cnt = f32(rules[0]);
   let val = cnt / min(f32((*hit).state), cnt);
   let sky = 0.4 + (*hit).norm.y * 0.6;
@@ -185,17 +181,17 @@ fn filmicToneACES(x: vec3f) -> vec3f
 }
 
 @vertex
-fn vM(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f
+fn V(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f
 {
   let pos = array<vec2f, 4>(vec2f(-1, 1), vec2f(-1), vec2f(1), vec2f(1, -1));
   return vec4f(pos[vertexIndex], 0, 1);
 }
 
 @fragment
-fn fM(@builtin(position) pos: vec4f) -> @location(0) vec4f
+fn F(@builtin(position) pos: vec4f) -> @location(0) vec4f
 {
-  let dirEyeSpace = normalize(vec3f((pos.xy - vec2f(1920, 1080) * 0.5) / 1080, 1 /* FOV */));
-  //let dirEyeSpace = normalize(vec3f((pos.xy - vec2f(1024, 578) * 0.5) / 578, 1 /* FOV */));
+  //let dirEyeSpace = normalize(vec3f((pos.xy - vec2f(1920, 1080) * 0.5) / 1080, 1 /* FOV */));
+  let dirEyeSpace = normalize(vec3f((pos.xy - vec2f(1024, 578) * 0.5) / 578, 1 /* FOV */));
 
   let ori = vec3f(uniforms[0] * cos(uniforms[2]) * cos(uniforms[1]), uniforms[0] * sin(uniforms[2]), uniforms[0] * cos(uniforms[2]) * sin(uniforms[1]));
 
@@ -220,5 +216,5 @@ fn fM(@builtin(position) pos: vec4f) -> @location(0) vec4f
     }
   }
 
-  return vec4f(pow(filmicToneACES(mix(col, vec3f(0), 1 - smoothstep(0, 30, uniforms[3]) + smoothstep(270, 300, uniforms[3]))), vec3f(0.5) /* gamma */), 1);
+  return vec4f(pow(filmicToneACES(mix(col, vec3f(0), 1 - smoothstep(0, 30, uniforms[3]) + smoothstep(270, 300, uniforms[3]))), vec3f(0.4545) ), 1);
 }

@@ -1,7 +1,7 @@
-//const FULLSCREEN = false;
+const FULLSCREEN = false;
 
-const CANVAS_WIDTH = 1920;
-const CANVAS_HEIGHT = 1080;
+const CANVAS_WIDTH = 1024; //1920;
+const CANVAS_HEIGHT = 578; //1080;
 
 let audioContext;
 let audioBufferSourceNode;
@@ -61,7 +61,7 @@ async function createComputePipeline(shaderModule, pipelineLayout)
     layout: pipelineLayout,
     compute: {
       module: shaderModule,
-      entryPoint: "cM"
+      entryPoint: "C"
     }
   });
 }
@@ -72,11 +72,11 @@ async function createRenderPipeline(shaderModule, pipelineLayout)
     layout: pipelineLayout,
     vertex: {
       module: shaderModule,
-      entryPoint: "vM"
+      entryPoint: "V"
     },
     fragment: {
       module: shaderModule,
-      entryPoint: "fM",
+      entryPoint: "F",
       targets: [{format: "bgra8unorm"}]
     },
     primitive: {topology: "triangle-strip"}
@@ -117,6 +117,7 @@ async function createAudioResources()
 
   let audioBindGroupLayout = device.createBindGroupLayout({
     entries: [
+      // Its smaller as a storage than uniform buffer
       {binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: {type: "read-only-storage"}},
       {binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: {type: "storage"}}
     ]});
@@ -201,7 +202,7 @@ async function createRenderResources()
 
   renderPassDescriptor = {
     colorAttachments: [{
-      undefined, // view
+      0, // view
       //clearValue: {r: 1.0, g: 0.0, b: 0.0, a: 1.0},
       loadOp: "clear",
       storeOp: "store"
@@ -227,15 +228,15 @@ async function createRenderResources()
   }
 }
 
-//let last;
+let last;
 
 function render(time)
 {  
-  /*if(last !== undefined) {
+  if(last !== undefined) {
     let frameTime = (performance.now() - last);
     document.title = `${(frameTime).toFixed(2)} / ${(1000.0 / frameTime).toFixed(2)}`;
   }
-  last = performance.now();*/
+  last = performance.now();
 
   // Initialize time and start audio
   if(startTime === undefined) {
@@ -284,15 +285,15 @@ function startRender()
 {
   document.querySelector("button").removeEventListener("click", startRender);
 
-  //if(FULLSCREEN)
+  if(FULLSCREEN)
     canvas.requestFullscreen();
-  /*else {
+  else {
     canvas.style.width = CANVAS_WIDTH;
     canvas.style.height = CANVAS_HEIGHT;
     canvas.style.position = "absolute";
     canvas.style.left = 0;
     canvas.style.top = 0;
-  }*/
+  }
 
   requestAnimationFrame(render);
 }
