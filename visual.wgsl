@@ -6,8 +6,8 @@ struct Hit
   dist: f32,
 }
 
-const gridMul = vec3i(1, 256, 256 * 256);
-const gridMulF = vec3f(gridMul);
+const GRID_MUL = vec3i(1, 256, 256 * 256);
+const GRID_MUL_F = vec3f(GRID_MUL);
 
 @group(0) @binding(0) var<storage> uniforms: array<f32>;
 @group(0) @binding(1) var<storage> grid: array<u32>;
@@ -17,13 +17,13 @@ const gridMulF = vec3f(gridMul);
 fn getCell(x: i32, y: i32, z: i32) -> u32
 {
   // Consider only states 0 and 1. Cells in refactory period do NOT count as active neighbours, i.e. are counted as 0.
-  return u32(1 - min(abs(1 - i32(grid[gridMul.z * z + gridMul.y * y + x])), 1));
+  return u32(1 - min(abs(1 - i32(grid[GRID_MUL.z * z + GRID_MUL.y * y + x])), 1));
 }
 
 fn getMooreNeighbourCountWrap(pos: vec3i) -> u32
 {
-  let dec = vec3i((pos.x - 1) % gridMul.y, (pos.y - 1) % gridMul.y, (pos.z - 1) % gridMul.y);
-  let inc = vec3i((pos.x + 1) % gridMul.y, (pos.y + 1) % gridMul.y, (pos.z + 1) % gridMul.y);
+  let dec = vec3i((pos.x - 1) % GRID_MUL.y, (pos.y - 1) % GRID_MUL.y, (pos.z - 1) % GRID_MUL.y);
+  let inc = vec3i((pos.x + 1) % GRID_MUL.y, (pos.y + 1) % GRID_MUL.y, (pos.z + 1) % GRID_MUL.y);
 
   return  getCell(pos.x, inc.y, pos.z) +
           getCell(inc.x, inc.y, pos.z) +
@@ -57,7 +57,7 @@ fn getMooreNeighbourCountWrap(pos: vec3i) -> u32
 fn C(@builtin(global_invocation_id) globalId: vec3u)
 {
   let pos = vec3i(globalId);
-  let index = dot(pos, gridMul);
+  let index = dot(pos, GRID_MUL);
   let value = grid[index];
 
   if value == 0 {
@@ -99,7 +99,7 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, hit: ptr<function, Hit>) -
   var mask = vec3f(0);
 
   (*hit).dist = 0;
-  (*hit).index = i32(dot(gridMulF, floor(vec3f(gridMulF.y * 0.5) + ori)));
+  (*hit).index = i32(dot(GRID_MUL_F, floor(vec3f(GRID_MUL_F.y * 0.5) + ori)));
  
   var iter = 0;
   loop {
@@ -123,7 +123,7 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, hit: ptr<function, Hit>) -
     mask.z = f32(t.z <= t.x && t.z <= t.y);
 
     t += mask * stepDir * invDir;
-    (*hit).index += i32(dot(gridMulF, mask * stepDir));
+    (*hit).index += i32(dot(GRID_MUL_F, mask * stepDir));
     
     iter++;
   }
@@ -131,10 +131,10 @@ fn traverseGrid(ori: vec3f, invDir: vec3f, tmax: f32, hit: ptr<function, Hit>) -
 
 fn calcOcclusion(pos: vec3f, index: i32, norm: vec3i) -> f32
 {
-  let above = index + dot(gridMul, norm);
+  let above = index + dot(GRID_MUL, norm);
   let dir = abs(norm);
-  let hori = dot(gridMul, dir.yzx);
-  let vert = dot(gridMul, dir.zxy);
+  let hori = dot(GRID_MUL, dir.yzx);
+  let vert = dot(GRID_MUL, dir.zxy);
 
   let edgeCellStates = vec4f(
     f32(min(1, grid[above + hori])),
@@ -163,7 +163,7 @@ fn shade(pos: vec3f, tmax: f32, hit: ptr<function, Hit>) -> vec3f
   let cnt = f32(rules[0]);
   let val = cnt / min(f32((*hit).state), cnt);
   let sky = 0.4 + (*hit).norm.y * 0.6;
-  let col = vec3f(0.005) + (1 - 0.15 * (cnt - 5)) * (vec3f(0.5) + pos / gridMulF.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / tmax);
+  let col = vec3f(0.005) + (1 - 0.15 * (cnt - 5)) * (vec3f(0.5) + pos / GRID_MUL_F.y) * sky * sky * val * val * 0.3 * exp(-3.5 * (*hit).dist / tmax);
   let occ = calcOcclusion(pos, (*hit).index, vec3i((*hit).norm));
 
   return col * occ * occ * occ;
@@ -177,7 +177,7 @@ fn filmicToneACES(x: vec3f) -> vec3f
   let c = 2.43;
   let d = 0.59;
   let e = 0.14;
-  return saturate(x * (a * x + vec3f(b)) / (x * (c * x + vec3f(d)) + vec3f(e)));
+  return saturate(x * (a * x + vec3(b)) / (x * (c * x + vec3(d)) + vec3(e)));
 }
 
 @vertex
@@ -190,8 +190,8 @@ fn V(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f
 @fragment
 fn F(@builtin(position) pos: vec4f) -> @location(0) vec4f
 {
-  //let dirEyeSpace = normalize(vec3f((pos.xy - vec2f(1920, 1080) * 0.5) / 1080, 1 /* FOV */));
-  let dirEyeSpace = normalize(vec3f((pos.xy - vec2f(1024, 578) * 0.5) / 578, 1 /* FOV */));
+  let dirEyeSpace = normalize(vec3f((pos.xy - vec2f(1920, 1080) * 0.5) / 1080, 1 /* FOV 50 */));
+  //let dirEyeSpace = normalize(vec3f((pos.xy - vec2f(1024, 578) * 0.5) / 578, 1 /* FOV 50 */));
 
   let ori = vec3f(uniforms[0] * cos(uniforms[2]) * cos(uniforms[1]), uniforms[0] * sin(uniforms[2]), uniforms[0] * cos(uniforms[2]) * sin(uniforms[1]));
 
@@ -200,7 +200,7 @@ fn F(@builtin(position) pos: vec4f) -> @location(0) vec4f
 
   var dir = ri * dirEyeSpace.x - cross(ri, fwd) * dirEyeSpace.y + fwd * dirEyeSpace.z;
 
-  let halfGrid = vec3f(gridMulF.y * 0.5);
+  let halfGrid = vec3f(GRID_MUL_F.y * 0.5);
   let invDir = 1 / dir;
 
   var tmin: f32;
@@ -209,12 +209,12 @@ fn F(@builtin(position) pos: vec4f) -> @location(0) vec4f
   var col = vec3f(0);
 
   if intersectAabb(-halfGrid, halfGrid, ori, invDir, &tmin, &tmax) {
-    tmin = max(tmin + 0.001, 0); // epsilon
+    tmin = max(tmin + 0.001, 0); // Epsilon
     tmax = tmax - 0.001 - tmin;
     if traverseGrid(ori + tmin * dir, invDir, tmax, &hit) {
       col = shade(ori + (tmin + hit.dist) * dir, tmax, &hit);
     }
   }
 
-  return vec4f(pow(filmicToneACES(mix(col, vec3f(0), 1 - smoothstep(0, 30, uniforms[3]) + smoothstep(270, 300, uniforms[3]))), vec3f(0.4545) ), 1);
+  return vec4f(pow(filmicToneACES(mix(col, vec3f(0), 1 - smoothstep(0, 15, uniforms[3]) + smoothstep(135, 150, uniforms[3]))), vec3f(0.4545)), 1);
 }

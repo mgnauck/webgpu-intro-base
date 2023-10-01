@@ -1,7 +1,7 @@
-const FULLSCREEN = false;
+//const FULLSCREEN = false;
 
-const CANVAS_WIDTH = 1024; //1920;
-const CANVAS_HEIGHT = 578; //1080;
+const CANVAS_WIDTH = 1920;
+const CANVAS_HEIGHT = 1080;
 
 let audioContext;
 let audioBufferSourceNode;
@@ -23,30 +23,30 @@ let simulationIteration = 0;
 let activeScene = -1;
 
 const RULES = new Uint32Array([
-   5,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,1,1,0,0,0,0,0,0,0, // clouds-5 / 0
-   5,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // 4/4-5 / 1
-   5,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,1,1,1,0,0,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0, // amoeba-5 / 2
-  10,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // pyro-10 / 3
-   5,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // framework-5 / 4
-  10,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,0,0,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0, // spiky-10 / 5
-  10,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,0,0,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0, // ripple-10 / 6
+   5,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,1,1,0,0,0,0,0,0,0, // clouds-5
+   5,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // 4/4-5
+   5,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,1,1,1,0,0,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0, // amoeba-5
+  10,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // pyro-10
+   5,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // framework-5
+  10,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,0,0,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0, // spiky-10
+  10,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,0,0,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0, // ripple-10
 ]);
 
-// Rule set indices are -1 in player compared to main!!
 // Time, rule, delta, radius
 const SCENES = [
-  0, 2, 0.2, 25, // amoeba
-  38, 3, 0.5, 320, // pyro
-  60, 2, 0.6, 220, // amoeba
-  80, 0, 1.0, 180, // clouds
-  110, 6, 0.75, 160, // ripple
-  150, 3, 0.875, 190, // pyro (trim down)
-  155, 4, 0.2, 180, // framework
-  190, 5, 0.3, 160, // spiky
-  220, 1, 0.4, 150, // 445
-  300, 1, 0.4, 190
+  0, 2, 0.1, 25, // amoeba
+  19, 3, 0.25, 320, // pyro
+  30, 2, 0.3, 220, // amoeba
+  40, 0, 0.5, 180, // clouds
+  55, 6, 0.375, 160, // ripple
+  75, 3, 0.437, 190, // pyro (trim down)
+  77, 4, 0.1, 180, // framework
+  95, 5, 0.15, 160, // spiky
+  110, 1, 0.2, 150, // 445
+  150, 1, 0.2, 190
 ];
 
+// Will be replaced by compression script
 const AUDIO_SHADER = `
 REPLACE_ME_AUDIO
 `;
@@ -112,13 +112,12 @@ async function createAudioResources()
 
   // Will be reused by visual shader
   uniformBuffer = device.createBuffer({
-    size: 4 * 4, // We actually only need two floats for audio uniforms
+    size: 4 * 4, // We actually only need 1 float for audio
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST});
 
   let audioBindGroupLayout = device.createBindGroupLayout({
     entries: [
-      // Its smaller as a storage than uniform buffer
-      {binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: {type: "read-only-storage"}},
+      {binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: {type: "read-only-storage"}}, // Was uniform
       {binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: {type: "storage"}}
     ]});
 
@@ -169,7 +168,7 @@ async function createRenderResources()
 {
   let bindGroupLayout = device.createBindGroupLayout({
     entries: [ 
-      {binding: 0, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: {type: "read-only-storage"}},
+      {binding: 0, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: {type: "read-only-storage"}}, // Was uniform
       {binding: 1, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: {type: "read-only-storage"}},
       {binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: {type: "storage"}},
       {binding: 3, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: {type: "read-only-storage"}},
@@ -228,15 +227,15 @@ async function createRenderResources()
   }
 }
 
-let last;
+//let last; // frame time
 
 function render(time)
 {  
-  if(last !== undefined) {
+  /*if(last !== undefined) {
     let frameTime = (performance.now() - last);
     document.title = `${(frameTime).toFixed(2)} / ${(1000.0 / frameTime).toFixed(2)}`;
   }
-  last = performance.now();
+  last = performance.now();*/
 
   // Initialize time and start audio
   if(startTime === undefined) {
@@ -245,32 +244,32 @@ function render(time)
   }
 
   // Current time
-  let timeInBeats = (audioContext.currentTime - startTime) * 2; // BPM / 60
-  if(timeInBeats >= 300) //SCENES.at(-1).t
+  time = audioContext.currentTime - startTime;
+  if(time >= 150) //SCENES.at(-1).t
     return;
 
   // Scene update
-  if(timeInBeats >= SCENES[4 * (activeScene + 1)])
+  if(time >= SCENES[4 * (activeScene + 1)])
     device.queue.writeBuffer(rulesBuffer, 0, RULES, SCENES[ 4 * (++activeScene) + 1 ] * 55, 55);
 
   // Current scene time
-  let t = (timeInBeats - SCENES[4 * activeScene]) / (SCENES[4 * (activeScene + 1)] - SCENES[4 * activeScene]);
+  let t = (time - SCENES[4 * activeScene]) / (SCENES[4 * (activeScene + 1)] - SCENES[4 * activeScene]);
 
   const commandEncoder = device.createCommandEncoder();
   
   // Simulation
-  if(timeInBeats - lastSimulationUpdateTime > SCENES[4 * activeScene + 2]) {
+  if(time - lastSimulationUpdateTime > SCENES[4 * activeScene + 2]) {
     encodeComputePassAndSubmit(commandEncoder, computePipeline, bindGroup[simulationIteration % 2]); 
     simulationIteration++;
-    lastSimulationUpdateTime = (audioContext.currentTime - startTime) * 2; // BPM / 60
+    lastSimulationUpdateTime = audioContext.currentTime - startTime;
   }
 
   // Camera
   device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
     SCENES[4 * activeScene + 3] + (SCENES[4 * (activeScene + 1) + 3] - SCENES[4 * activeScene + 3]) * t, // radius
     ((activeScene % 2) ? 1 : -1) * t * 2 * Math.PI, // phi
-    (0.6 + 0.3 * Math.sin(timeInBeats * 0.2)) * Math.sin(timeInBeats * 0.05), // theta
-    timeInBeats]));
+    (0.6 + 0.3 * Math.sin(time * 0.4)) * Math.sin(time * 0.1), // theta
+    time]));
 
   // Render
   renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
@@ -285,15 +284,15 @@ function startRender()
 {
   document.querySelector("button").removeEventListener("click", startRender);
 
-  if(FULLSCREEN)
+  //if(FULLSCREEN)
     canvas.requestFullscreen();
-  else {
+  /*else {
     canvas.style.width = CANVAS_WIDTH;
     canvas.style.height = CANVAS_HEIGHT;
     canvas.style.position = "absolute";
     canvas.style.left = 0;
     canvas.style.top = 0;
-  }
+  }*/
 
   requestAnimationFrame(render);
 }

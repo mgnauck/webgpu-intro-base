@@ -117,7 +117,7 @@ fn isPattern(time: f32, start: u32, end: u32) -> bool
   return patternIndex >= start && patternIndex < end;
 }
 
-@group(0) @binding(0) var<storage> params: array<u32>;
+@group(0) @binding(0) var<storage> params: array<u32>; // params[0] = sample rate
 @group(0) @binding(1) var<storage, read_write> buffer: array<vec2f>;
 
 @compute @workgroup_size(4, 4, 4)
@@ -169,7 +169,7 @@ fn C(@builtin(global_invocation_id) globalId: vec3u)
   }
 
   // Party special
-  if time >= 75 && time < 77.5
+  if time >= 75 && time < 77
   {
     output += 0.1 * noise(time).xy;
   }

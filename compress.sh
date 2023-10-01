@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Script requires the following tools:
+#
+# https://github.com/mgnauck/wgslminify
+# https://github.com/mgnauck/js-payload-compress
+#
+# Run: ./compress.sh player.js C,V,F
+
 if [ ! -e wgslminify ] || [ ! -e js-payload-compress ]; then
   echo "Compression script needs wgslminify and js-payload-compress in current path!"
   exit 1
@@ -23,7 +30,4 @@ sed -f ../compress.sed ../$infile > ${infile_name}_with_shaders.${infile_ext}
 
 terser ${infile_name}_with_shaders.${infile_ext} -m -c toplevel,passes=5,drop_console=true,unsafe=true,pure_getters=true,keep_fargs=false,booleans_as_integers=true --toplevel > ${infile_name}_minified.${infile_ext}
 
-../js-payload-compress --zopfli-iterations=100 ${infile_name}_minified.${infile_ext} ${infile_name}_compressed.html
-
-# Example:
-# ./compress.sh player.js cM,vM,fM
+../js-payload-compress --zopfli-iterations=50 ${infile_name}_minified.${infile_ext} ${infile_name}_compressed.html
